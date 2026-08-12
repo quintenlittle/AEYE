@@ -436,6 +436,13 @@ legend { font-size: 11px; color: var(--sclera); padding: 0 6px; }
 
 main { flex: 1; display: flex; min-height: 0; }
 
+/* stage = the non-eye area. A vertical stack: the chat/imagine/dream/sidebar
+   row on top, the composer docked beneath it -- so the composer aligns with the
+   chat column and never runs under the eye panel. When the eye is hidden the
+   eye panel collapses and the stage (and its composer) take the full width. */
+#stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#stage-content { flex: 1; display: flex; min-height: 0; }
+
 /* "hide eye" setting: drop the eye panel entirely (its render loop pauses to
    save GPU) and let the chat take the whole width */
 body.eye-hidden #eye-panel { display: none; }
@@ -1224,8 +1231,8 @@ button.ghost { color: var(--sclera); }
 ::-webkit-scrollbar-corner { background: var(--bg); }
 
 /* ---------------- browser sidebar (sidebar.js) ---------------- */
-/* a third flex child of <main>; collapses to zero width with a smooth slide.
-   All colors are theme variables so it tracks OLED / light / custom themes. */
+/* rightmost flex child of #stage-content; collapses to zero width with a smooth
+   slide. All colors are theme variables so it tracks OLED / light / custom. */
 #sidebar {
   flex: 0 0 420px;
   display: flex;

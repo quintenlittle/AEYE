@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body data-state="idle">
 <script>
@@ -82,6 +82,11 @@ if (!localStorage.getItem('aeye-default-v3')) {
       <div id="eye-status">&#9673; WATCHING</div>
     </section>
 
+    <!-- stage = everything to the right of the eye. The chat/imagine/dream/
+         sidebar row sits on top; the composer docks beneath it, so the composer
+         spans the chat column + sidebar but never the eye box. -->
+    <div id="stage">
+      <div id="stage-content">
     <section id="chat-panel">
       <div id="skull-layer" aria-hidden="true"><pre id="skull"></pre></div>
       <div id="messages"></div>
@@ -172,9 +177,9 @@ if (!localStorage.getItem('aeye-default-v3')) {
                 allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>
       </div>
     </aside>
-  </main>
-  <!-- composer is a full-width bottom bar under BOTH the chat column and the
-       sidebar; hidden during imagine/dream via a :has() rule in style.css -->
+      </div><!-- /#stage-content -->
+      <!-- composer: bottom bar spanning the chat column + sidebar only (never
+           the eye box); hidden during imagine/dream via a :has() rule in style.css -->
   <form id="composer" autocomplete="off">
     <button id="attach" type="button" title="Attach an image">&#128206;</button>
     <button id="mic" type="button" title="Dictate with your mic (local Whisper)">&#127908;</button>
@@ -183,6 +188,8 @@ if (!localStorage.getItem('aeye-default-v3')) {
     <button id="send" type="submit">&#9654;</button>
     <input id="file-input" type="file" accept="image/*" multiple hidden>
   </form>
+    </div><!-- /#stage -->
+  </main>
   <button id="sidebar-tab" title="Open browser sidebar" aria-label="Open browser sidebar">&#9707;</button>
 
   <!-- ============ MANAGE (model mgmt / TTS / STT) ============ -->
