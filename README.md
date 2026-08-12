@@ -1,5 +1,10 @@
 # ◉ AEYE — the all-seeing local LLM container
 
+<p align="center">
+  <video src="https://github.com/quintenlittle/aeye/raw/main/docs/demo.mp4" controls muted loop width="880"></video>
+</p>
+<p align="center"><sub>▶ <a href="https://github.com/quintenlittle/aeye/raw/main/docs/demo.mp4">Watch the demo</a> if the player above doesn't load.</sub></p>
+
 **A local LLM container for Windows, designed with privacy and security in
 mind.** Chat with any Ollama or HuggingFace model, generate **images and video**,
 talk to it and have it talk back — all **100% on your machine**, with nothing
@@ -13,6 +18,14 @@ tagged for *your* GPU/RAM (with CPU-only picks), and the GPU-hungry extras — t
 animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 
 > **▶ [Download the latest installer](https://github.com/quintenlittle/aeye/releases/latest)** — Windows 10/11 · one guided setup · ~73 MB
+
+> ⚠️ **Unsigned build.** AEYE isn't code-signed yet, so the first launch shows a one-time
+> Windows **SmartScreen** prompt — click **More info → Run anyway**. That's a per-app
+> override; you **don't need to turn off Windows Defender or Tamper Protection**. Optionally
+> verify the download's **SHA-256** against the value on the
+> [release page](https://github.com/quintenlittle/aeye/releases/latest). If Defender
+> false-flags the installer (common for unsigned apps), restore that one file from Windows
+> Security → **Protection history**.
 
 ## Install
 
