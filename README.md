@@ -17,13 +17,12 @@ animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 > **▶ [Download the latest installer](https://github.com/quintenlittle/aeye/releases/latest)** — Windows 10/11 · one guided setup · ~73 MB
 
 > ⚠️ **Unsigned build.** AEYE isn't code-signed yet, so the first launch shows a one-time
-> Windows **SmartScreen** prompt — click **More info → Run anyway**. That's a per-app
-> override; you **don't need to turn off Windows Defender or Tamper Protection**. Optionally
-> verify the download's **SHA-256** against the value on the
+> Windows **SmartScreen** prompt — click **More info → Run anyway**.
+> You can verify the download's **SHA-256** against the value on the
 > [release page](https://github.com/quintenlittle/aeye/releases/latest). If Defender
 > false-flags the installer (common for unsigned apps), restore that one file from Windows
 > Security → **Protection history**.
-> Alternatively you can temporarily disable Windows Defender and re-enable after the install.
+> Alternatively, you can just temporarily disable Windows Defender and re-enable it after the installation finishes.
 
 <img width="870" height="1807" alt="Instructions" src="https://github.com/user-attachments/assets/bd94143d-beb3-4e33-8e73-a3ffb57893a4" />
 
