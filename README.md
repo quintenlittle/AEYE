@@ -1,12 +1,6 @@
 # ◉ AEYE — the all-seeing local LLM container
 
-
-
-
-
-<p align="center">
-  <a href="[https://github.com/quintenlittle/aeye/raw/main/docs/demo.mp4](https://github.com/user-attachments/assets/4b8dcbec-fd82-465e-8154-a36cd928d6be)">
-</p>
+https://github.com/user-attachments/assets/c2d75a88-d99f-4adc-b67c-c122bc038fc1
 
 **A local LLM container for Windows, designed with privacy and security in
 mind.** Chat with any Ollama or HuggingFace model, generate **images and video**,
