@@ -54,3 +54,7 @@ _incoming/
 # build-generated assets (build.py recreates them)
 assets/version_info.txt
 assets/skull_frames/
+
+# dev-mode runtime data (DATA_DIR = repo root when running from source)
+.webview/
+adblock_rules.txt

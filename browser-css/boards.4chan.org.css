@@ -1,0 +1,122 @@
+/* === GLOBAL OLED BLACK + GREEN THEME === */
+
+:root {
+  --bg: #000000;
+  --bg-alt: #050505;
+  --text: #00ff9c;
+  --text-dim: #00cc7a;
+  --border: #003d26;
+  --glow: rgba(0, 255, 156, 0.25);
+}
+
+/* Page background */
+body {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+/* Links */
+a {
+  color: var(--text) !important;
+}
+a:hover {
+  color: #66ffc2 !important;
+  text-shadow: 0 0 6px var(--glow);
+}
+
+/* Posts */
+.post {
+  background: var(--bg-alt) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 0 6px rgba(0,255,156,0.05);
+}
+
+/* Reply boxes */
+.reply {
+  background: var(--bg-alt) !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* Quote text */
+.quote {
+  color: #00cc66 !important;
+}
+
+/* Greentext */
+span.quote {
+  color: #00ff66 !important;
+}
+
+/* Headers */
+.subject {
+  color: #00ffaa !important;
+}
+
+/* Name field */
+.name {
+  color: #66ffcc !important;
+}
+
+/* Board list / nav */
+.boardList {
+  background: var(--bg-alt) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+/* Inputs / textarea */
+input, textarea {
+  background: #000 !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* Scrollbar (WebKit) */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #000;
+}
+::-webkit-scrollbar-thumb {
+  background: #003d26;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00ff9c;
+}
+
+/* === BOARD TITLE (your format preserved) === */
+
+div.boardTitle {
+  font-weight: 400 !important;
+  color: var(--text) !important;
+  text-shadow: 0 0 8px var(--glow);
+}
+
+:root.yotsuba div.boardTitle {
+  font-family: sans-serif !important;
+  text-shadow: 0 0 10px rgba(0,255,156,0.4);
+}
+
+:root.yotsuba-b div.boardTitle {
+  font-family: sans-serif !important;
+  text-shadow: 0 0 10px rgba(0,255,120,0.4);
+}
+
+:root.photon div.boardTitle {
+  font-family: sans-serif !important;
+  text-shadow: 0 0 10px rgba(0,200,255,0.35);
+}
+
+:root.tomorrow div.boardTitle {
+  font-family: sans-serif !important;
+  text-shadow: 0 0 10px rgba(0,255,180,0.35);
+}
+
+/* === OPTIONAL: subtle CRT glow vibe === */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at center, transparent 60%, rgba(0,255,156,0.03));
+}

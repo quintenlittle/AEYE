@@ -12,7 +12,7 @@ echo.
 if not exist dist mkdir dist
 del /q "dist\aeye-portable.zip" >nul 2>&1
 
-powershell -NoProfile -Command "Compress-Archive -Path 'server.py','desktop.py','paths.py','version.txt','install.bat','aeye.bat','start.bat','package.bat','build.py','build.bat','aeye.spec','BUILD.md','requirements.txt','requirements-hf.txt','requirements-img.txt','requirements-video.txt','requirements-tts.txt','requirements-stt.txt','requirements-rag.txt','requirements-web.txt','plugins','tools','installer','README.md','CLAUDE.md','skull.txt','AEYE.ico','static' -DestinationPath 'dist\aeye-portable.zip' -Force"
+powershell -NoProfile -Command "Compress-Archive -Path 'server.py','desktop.py','paths.py','adblock.py','version.txt','install.bat','aeye.bat','start.bat','package.bat','build.py','build.bat','aeye.spec','BUILD.md','requirements.txt','requirements-hf.txt','requirements-img.txt','requirements-video.txt','requirements-tts.txt','requirements-stt.txt','requirements-rag.txt','requirements-web.txt','plugins','browser-css','tools','installer','README.md','CLAUDE.md','skull.txt','AEYE.ico','static' -DestinationPath 'dist\aeye-portable.zip' -Force"
 if errorlevel 1 (
     echo [X] Packaging failed.
     pause

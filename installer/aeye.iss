@@ -79,6 +79,7 @@ Name: "relayautostart"; Description: "Start the local board-ticker relay at logi
 Name: "{userappdata}\AEYE";          Flags: uninsneveruninstall
 Name: "{userappdata}\AEYE\relay";    Flags: uninsneveruninstall
 Name: "{userappdata}\AEYE\plugins";  Flags: uninsneveruninstall
+Name: "{userappdata}\AEYE\browser-css";  Flags: uninsneveruninstall
 
 [Files]
 ; --- the frozen core app (whole PyInstaller onedir tree) ---
@@ -100,6 +101,8 @@ Source: "..\tools\unregister-relay-task.bat"; DestDir: "{app}\tools"; Flags: ign
 Source: "..\aeye-4chan-relay.py"; DestDir: "{userappdata}\AEYE\relay"; Flags: onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist; Components: core
 ; --- bundled RSS reader plugin -> per-user plugins (never clobbers a user copy) ---
 Source: "..\plugins\rss\*"; DestDir: "{userappdata}\AEYE\plugins\rss"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist; Components: core
+; --- default sidebar-browser CSS -> per-user browser-css (never clobbers a user copy) ---
+Source: "..\browser-css\*"; DestDir: "{userappdata}\AEYE\browser-css"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist; Components: core
 ; --- WebView2 offline bootstrapper: copied to {tmp} only if the runtime is absent ---
 Source: "..\assets\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist; Check: NeedsWebView2
 ; --- default Piper voice: pre-seed the per-user HF cache so TTS works offline OOTB ---

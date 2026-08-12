@@ -23,6 +23,7 @@ if sys.stdout is None or sys.stderr is None:
     sys.stdout = sys.stderr = _log
 
 import server  # noqa: E402  (needs the stdout shim above -- it prints on import)
+import adblock  # noqa: E402  (WebView2 network-level ad-block)
 
 
 def _serve() -> None:
@@ -162,6 +163,8 @@ def _enable_context_menus(window) -> None:
                 core.Settings.IsPasswordAutosaveEnabled = False
             except Exception:
                 pass
+            # same CoreWebView2-ready moment -> wire the network ad-block filter
+            adblock.attach(core)
         except Exception:
             pass
 
