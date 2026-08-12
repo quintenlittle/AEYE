@@ -1,7 +1,11 @@
 # ◉ AEYE — the all-seeing local LLM container
 
+
+
+
+
 <p align="center">
-  <a href="https://github.com/quintenlittle/aeye/raw/main/docs/demo.mp4"><b>▶ Watch the demo</b></a> — a ~45-second walkthrough
+  <a href="[https://github.com/quintenlittle/aeye/raw/main/docs/demo.mp4](https://github.com/user-attachments/assets/4b8dcbec-fd82-465e-8154-a36cd928d6be)">
 </p>
 
 **A local LLM container for Windows, designed with privacy and security in
