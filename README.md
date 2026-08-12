@@ -1,9 +1,16 @@
-# ◉ AEYE — the all-seeing LLM container
+# ◉ AEYE — the all-seeing local LLM container
 
-A local LLM chat container for Windows with a procedurally-rendered **ASCII eye
-that follows your mouse cursor**. Talk to any Ollama model or load HuggingFace
-models directly — the eye watches, thinks, speaks, and gets bloodshot when
-things go wrong.
+**A local LLM container for Windows, designed with privacy and security in
+mind.** Chat with any Ollama or HuggingFace model, generate **images and video**,
+talk to it and have it talk back — all **100% on your machine**, with nothing
+phoning home by default. The whole interface is **100% hackable** (plain
+HTML/CSS/JS you can rewrite) and extendable with **custom plugins**. Over it all,
+a procedurally-rendered ASCII **eye follows your mouse cursor** — it watches,
+thinks, speaks, and gets bloodshot when things go wrong.
+
+**Runs on modest hardware, too:** nothing auto-loads at boot, every model is
+tagged for *your* GPU/RAM (with CPU-only picks), and the GPU-hungry extras — the
+animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 
 ```
              .--''              ''--.
@@ -19,34 +26,33 @@ things go wrong.
 
 ## Install
 
-Double-click **`install.bat`**. It will:
+Download and run the latest **`aeye-setup-v*.exe`** — one guided installer that
+sets everything up in a single pass:
 
-1. Find Python 3 (or offer to install it via winget)
-2. Create a private `.venv`
-3. Install the core app — FastAPI + uvicorn + httpx + pywebview (desktop shell)
-4. Optionally install HuggingFace support — PyTorch (auto-detects NVIDIA GPU
-   for the CUDA build) + transformers + accelerate (+ bitsandbytes for 4-bit)
-   + diffusers image generation
-5. Optionally install Piper neural TTS (local voices)
-6. Optionally install Whisper speech-to-text (local mic dictation)
-7. Install Ollama if missing — via winget, or by downloading the official
-   installer directly when winget isn't available
-8. Optionally pull the default chat model (dolphin-mistral, ~4 GB) so the first
+1. The **app and its bundled Python runtime** — nothing to install just to *run* it
+2. The **Microsoft WebView2 runtime** — installed silently if it's missing
+3. **Ollama** and the default chat model (dolphin-mistral, ~4 GB), so the first
    launch is ready to talk
-9. Put an **AEYE shortcut on the Desktop** (with the eye icon)
+4. Optional **AI extras** you tick during setup — PyTorch + transformers +
+   diffusers (**image *and* video generation**), Whisper (speech-to-text) and
+   document RAG
+5. A default **Piper** neural voice for text-to-speech
+6. **Start-menu and Desktop shortcuts** (with the eye icon)
 
-Then run **`aeye.bat`** (or the Desktop shortcut) — AEYE opens **maximized as a
-single desktop window** (server embedded, black title bar, no browser needed).
-Prefer browser mode? **`start.bat`** launches the server and opens
-`http://127.0.0.1:8130` in your browser.
+Launch **AEYE** from the Start menu or Desktop — it opens **maximized as a single
+desktop window** (server embedded, black title bar, no browser needed).
+
+Your data — model metadata, opt-in memory, plugins, tokens and settings — lives in
+**`%APPDATA%\AEYE`** and is **never touched by an upgrade**: run a newer
+`aeye-setup` straight over the top and everything carries across. Uninstalling
+(via *Add or Remove Programs*) offers to keep or purge that folder.
 
 ### Moving AEYE to another machine
 
-Run **`package.bat`** — it builds `disteye-portable.zip` containing the whole
-app (sources, installer, icon; no venv, caches, logs or tokens). Copy the zip to
-the new machine, extract anywhere, and double-click `install.bat` inside.
-Models are not packaged: HuggingFace models re-download into the new machine's
-cache, and Ollama models are re-pulled from the library drawer.
+Run the same **`aeye-setup`** installer on the new PC. Models aren't bundled —
+HuggingFace models re-download into the new machine's cache and Ollama models
+re-pull from the library drawer. To bring your chats, plugins and settings along,
+copy your **`%APPDATA%\AEYE`** folder across.
 
 ### The desktop window
 
@@ -107,17 +113,12 @@ To unlock gated repos (optional), create a free token at
 the model's page. Then give AEYE the token — **no interactive login**. Easiest
 first:
 
-1. **Token file (simplest).** Make a file called **`hf_token.txt`** next to
-   `start.bat`, paste the token in as the only line, save. `start.bat` loads it
-   automatically on launch and prints *"HuggingFace token loaded — gated models
-   unlocked."* Keep this file private (don't share it).
-2. **Environment variable.** Set it before launching:
-   ```bat
-   set HF_TOKEN=hf_xxxxxxxxxxxxxxxx
-   start.bat
-   ```
-   To make it permanent for your user account: `setx HF_TOKEN hf_xxxx` (then open
-   a new terminal).
+1. **Token file (simplest).** Put the token as the only line in
+   **`%APPDATA%\AEYE\hf_token.txt`** — Settings shows the exact folder with an
+   *open keys folder* button. AEYE loads it automatically on launch; keep the file
+   private.
+2. **Environment variable.** Set `HF_TOKEN` for your account, then relaunch AEYE:
+   `setx HF_TOKEN hf_xxxxxxxxxxxxxxxx`.
 
 AEYE reads `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` / `HUGGINGFACE_TOKEN` if any is
 present. If none is set, everything public still works — no login required.
@@ -253,8 +254,19 @@ PNG or **send to chat** to drop it into the transcript. The NSFW safety checker
 is disabled, and fp16 + model-CPU-offload keep SDXL/FLUX alive on 8 GB cards.
 
 > Image generation and HF model loading pin **transformers < 5** — the 5.x CLIP
-> loader is incompatible with the current diffusers release. `install.bat`
+> loader is incompatible with the current diffusers release. The installer's AI-extras step
 > handles this automatically.
+
+## Video generation (dream)
+
+The library also has a **text-to-video** category. Hit **load ▸ dream** on a video
+model to load it, then the **dream** button opens a panel much like imagine —
+prompt, steps, guidance, frame count, fps and seed. AEYE writes an **MP4** when a
+codec backend is available, and otherwise falls back to an **animated GIF** (via
+Pillow alone) — so video works even without the optional dependency. AnimateDiff
+motion adapters are supported on an SD 1.5 base, and the same fp16 +
+model-CPU-offload tricks keep it alive on smaller cards. Download the clip or
+**send to chat** to drop it into the transcript.
 
 ## Voice (100% local, both ways)
 
@@ -274,8 +286,7 @@ reply text — ever leaves the machine.
 - **🎤 mic** — click to dictate: it records from your microphone, transcribes
   locally with Whisper (`faster-whisper`), and drops the text into the chat box
   for you to edit or send. The model (~140 MB for `base`) downloads once on
-  first use, then works fully offline. Install it by answering **Y** to
-  "Install Whisper speech-to-text" in `install.bat`; without it the mic button
+  first use, then works fully offline. Install it by ticking the AI extras during setup (or later from Start-menu ▸ Install or Repair AI Extras); without it the mic button
   stays disabled. Set `AEYE_WHISPER_MODEL` (tiny/base/small/medium/large-v3) to
   trade speed for accuracy — default `base`, CPU int8 so it never touches the
   LLM's VRAM.
@@ -306,8 +317,7 @@ maps to Piper's length-scale. Hit **test** to preview, **🗑** to delete a voic
 played back gaplessly through the Web Audio API — the eye starts talking on the
 first finished sentence and paces itself to the typewriter (tune with `rate`).
 
-Install Piper by answering **Y** to "Install Piper neural TTS" in `install.bat`,
-or later with `.venv\Scripts\pip install -r requirements-tts.txt`. Without it the
+Install Piper by ticking the AI extras during setup (or later from Start-menu ▸ Install or Repair AI Extras). Without it the
 🔊 button is disabled (chat still works; it just won't speak).
 
 ## Privacy / no-log
@@ -374,9 +384,38 @@ modelfile* — which runs `ollama create` and streams the build output. The
 Temperature, max tokens and a system prompt are adjustable in the top bar /
 drawer. Enter sends; Shift+Enter inserts a newline.
 
+## Plugins
+
+AEYE ships a small **plugin system** for wiring in your own local tools. Drop a
+folder into `%APPDATA%\AEYE\plugins\<id>\` with an `aeye-plugin.json` manifest
+(name, trigger, command); a chat message that starts with the trigger runs the
+tool and streams its output into a chat bubble. Plugins run **only** from what
+*you* type — never from model output — and each can keep its own isolated Python
+environment. A bundled **`echo`** sample shows the format and the **`rss`** reader
+(below) is a working example; you can also install one straight from a GitHub URL
+and edit its manifest in the built-in editor.
+
+## Running on modest hardware
+
+AEYE is built to stay usable on modest or GPU-light machines:
+
+- **Nothing auto-loads at boot.** A model loads only when you pick it, so a fresh
+  launch uses almost no RAM/VRAM. A startup picker offers to restore just the last
+  models you used — loaded one at a time so they never fight over VRAM.
+- **CPU-only picks.** The library tags every model **FITS GPU / CPU ONLY /
+  TOO BIG** for *your* hardware, and plenty of small (0.5–3B) models run happily
+  on CPU.
+- **Hide the GPU-hungry extras.** Under *settings ▸ Display* you can **hide the
+  eye** (its 78×30 grid stops rendering entirely — freeing the GPU and giving the
+  chat the full width) and **cap its frame rate** (15–60 fps). The scrolling
+  price / board tickers can be hidden too.
+- **CPU offload for image/video.** fp16 + model-CPU-offload keep SDXL/FLUX and the
+  video pipelines alive on 8 GB cards; a pipeline that can't fit simply stays idle
+  instead of crashing.
+
 ## Configuration
 
-Environment variables (set before running `start.bat`):
+Environment variables (set before launching AEYE):
 
 | Variable      | Default                  | Purpose                    |
 |---------------|--------------------------|----------------------------|
@@ -426,28 +465,19 @@ stays readable from the top. Your API keys live in `%APPDATA%\AEYE`
 
 ```
 aeye/
-├── install.bat          one-click Windows installer (venv, deps, shortcut)
-├── package.bat          builds disteye-portable.zip to move to another PC
-├── aeye.bat             launches the desktop app (single window, no browser)
-├── start.bat            launches server + browser (alternative to aeye.bat)
-├── server.py            FastAPI server (Ollama proxy + HF backend)
+├── server.py            FastAPI server (Ollama proxy + HF / diffusers backends)
 ├── desktop.py           desktop entrypoint (server + UI in a native window)
 ├── aeye-4chan-relay.py  local CORS relay for the board tickers (opt-in)
-├── requirements.txt     core deps (incl. pywebview desktop shell)
-├── requirements-hf.txt  optional HuggingFace deps (transformers<5)
-├── requirements-img.txt optional image-gen deps (diffusers)
-├── requirements-tts.txt optional Piper neural-TTS deps
-├── requirements-stt.txt optional Whisper speech-to-text deps
-├── catalog_cache.json   auto-generated cache of trending models (safe to delete)
-└── static/
-    ├── index.html       UI shell
-    ├── style.css        phosphor CRT theme (eye mood via CSS vars)
-    ├── eye.js           procedural ASCII eye renderer
-    ├── chat.js          streaming chat, image attach, model management
-    ├── library.js       model library + modelfile editor
-    ├── imagine.js       image-generation panel
-    ├── voice.js         text-to-speech (local Piper)
-    ├── stt.js           speech-to-text mic (local Whisper)
-    ├── memory.js        opt-in chat memory + projects (see Memory section)
-    └── aeye.ico         pixel-art eye icon (window/taskbar/shortcut)
+├── build.py             builds the frozen app (PyInstaller) -> dist/AEYE
+├── aeye.spec            PyInstaller spec
+├── installer/           Inno Setup script -> aeye-setup-vX.Y.Z.exe (the installer)
+├── assets/              installer assets (WebView2 bootstrapper, skull frames, icon)
+├── tools/               extras / Ollama / relay setup scripts run by the installer
+├── plugins/             bundled sample plugins (echo, rss)
+├── requirements*.txt    core + optional (hf / img / tts / stt) deps
+├── install.bat          dev only: set up a local .venv and run from source
+├── start.bat            dev only: run server + browser from source
+└── static/              the 100%-hackable UI — index.html, style.css and the
+                     eye / chat / library / imagine / dream / voice / stt /
+                     ticker / boards / plugins / theme JS modules
 ```
