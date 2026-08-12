@@ -8,8 +8,9 @@
    ever leaves the machine. While web is off (the default) OR a fetch fails,
    each lane reads a red "ticker offline" and no request is made.
 
-   Which symbols show is configurable in manage > settings (defaults: WTI
-   oil + bitcoin only); the set is saved in localStorage['aeye-tickers'].
+   Which symbols show is configurable in manage > settings (every commodity
+   and crypto is enabled by default); the set is saved in
+   localStorage['aeye-tickers'] and re-applied on load.
    ================================================================ */
 (() => {
   'use strict';
@@ -20,21 +21,21 @@
   const CATALOG = {
     commodity: [
       { sym: 'CL=F',  label: 'WTI OIL', on: true },
-      { sym: 'BZ=F',  label: 'BRENT' },
-      { sym: 'GC=F',  label: 'GOLD' },
-      { sym: 'SI=F',  label: 'SILVER' },
-      { sym: 'NG=F',  label: 'NAT GAS' },
-      { sym: 'HG=F',  label: 'COPPER' },
-      { sym: '^GSPC', label: 'S&P 500' },
+      { sym: 'BZ=F',  label: 'BRENT',   on: true },
+      { sym: 'GC=F',  label: 'GOLD',    on: true },
+      { sym: 'SI=F',  label: 'SILVER',  on: true },
+      { sym: 'NG=F',  label: 'NAT GAS', on: true },
+      { sym: 'HG=F',  label: 'COPPER',  on: true },
+      { sym: '^GSPC', label: 'S&P 500', on: true },
     ],
     crypto: [
-      { sym: 'BTC-USD',  label: 'BITCOIN', on: true },
-      { sym: 'ETH-USD',  label: 'ETHEREUM' },
-      { sym: 'SOL-USD',  label: 'SOLANA' },
-      { sym: 'XRP-USD',  label: 'XRP' },
-      { sym: 'DOGE-USD', label: 'DOGECOIN' },
-      { sym: 'BNB-USD',  label: 'BNB' },
-      { sym: 'ADA-USD',  label: 'CARDANO' },
+      { sym: 'BTC-USD',  label: 'BITCOIN',  on: true },
+      { sym: 'ETH-USD',  label: 'ETHEREUM', on: true },
+      { sym: 'SOL-USD',  label: 'SOLANA',   on: true },
+      { sym: 'XRP-USD',  label: 'XRP',      on: true },
+      { sym: 'DOGE-USD', label: 'DOGECOIN', on: true },
+      { sym: 'BNB-USD',  label: 'BNB',      on: true },
+      { sym: 'ADA-USD',  label: 'CARDANO',  on: true },
     ],
   };
   const KEY = 'aeye-tickers';

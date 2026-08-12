@@ -192,7 +192,10 @@
   // (any HTTP status) means something answered; a thrown error = not running /
   // unreachable. Used by the settings "test" button and the failure messaging.
   async function probeRelay() {
-    const relay = getRelay();
+    // effectiveRelay() (not getRelay()) -> in LOCAL mode getRelay() is empty
+    // (that's the custom URL), which used to make the probe report "not running"
+    // even though the bundled relay was up. Probe whatever relay is in effect.
+    const relay = effectiveRelay();
     if (!relay) return { set: false };
     try { await fetch(relayUrl('g'), { cache: 'no-store' }); return { set: true, up: true }; }
     catch { return { set: true, up: false }; }

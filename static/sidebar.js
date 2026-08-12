@@ -142,19 +142,13 @@
       urlIn.blur();
     });
     const tab = $('sidebar-tab');
-    if (tab) tab.addEventListener('click', () => {
-      expand();
-      if (hidx < 0) { const last = localStorage.getItem(URL_KEY); if (last) load(last, true); }
-    });
+    if (tab) tab.addEventListener('click', () => expand());
 
-    // restore last state
-    if (localStorage.getItem(OPEN_KEY) === '1') {
-      expand();
-      const last = localStorage.getItem(URL_KEY);
-      if (last) load(last, true);
-    } else {
-      collapse();
-    }
+    // Always start hidden with a blank page. We deliberately do NOT restore the
+    // last-open state or reopen the last thread on launch -- the browser opens
+    // blank (the iframe defaults to about:blank) and only navigates once you
+    // click a link or type a URL.
+    collapse();
     updateNav();
 
     // Global link interception: a plain left-click on any external http(s) <a>
