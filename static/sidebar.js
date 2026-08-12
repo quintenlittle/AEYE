@@ -11,10 +11,12 @@
    Because a cross-origin iframe's own history/URL is unreadable from here,
    navigation (back/forward) is driven by OUR OWN stack of the URLs we loaded.
 
-   This is Increment 1 -- pure frontend, no host changes. Increment 2 wires
-   CoreWebView2 in desktop.py (WebResourceRequested ad-block + X-Frame-Options
-   stripping + AddScriptToExecuteOnDocumentCreated theme/DOM injection) to turn
-   this same iframe into a universal, ad-blocked, themed browser.
+   Non-YouTube pages load through the server proxy `/api/browse` (server.py):
+   it strips X-Frame-Options so any site embeds, drops ad/tracker tags, and
+   injects an OLED theme -- so the sidebar is universal + ad-blocked + themed
+   without any WebView2 host code (which would risk the whole app if it broke).
+   A future increment could add CoreWebView2 WebResourceRequested for
+   network-level ad-blocking + full-fidelity (cookies/SPA) embedding.
 
    Public API: window.SIDEBAR = { open(url), toggle(), expand(), collapse() }.
    ================================================================ */
@@ -49,6 +51,16 @@
     return url;
   }
 
+  // What actually goes into the iframe's src. YouTube embeds load DIRECTLY
+  // (they aren't X-Frame-Options blocked and the proxy can't run their SPA);
+  // everything else goes through /api/browse -- the server strips X-Frame-Options
+  // so any site embeds, drops ad/tracker tags, and injects the OLED theme.
+  function frameSrc(url) {
+    const n = normalize(url);
+    if (/^https?:\/\/(www\.)?youtube\.com\/embed\//i.test(n)) return n;
+    return '/api/browse?url=' + encodeURIComponent(n);
+  }
+
   const frame = () => $('sb-frame');
   const setUrlBar = (url) => { const b = $('sb-url'); if (b) b.value = url; };
 
@@ -61,7 +73,7 @@
   // load a URL into the iframe. push=false when moving through our own history.
   function load(url, push) {
     if (!isHttp(url)) return;
-    frame().src = normalize(url);
+    frame().src = frameSrc(url);
     setUrlBar(url);
     localStorage.setItem(URL_KEY, url);
     if (push !== false) {
@@ -118,6 +130,17 @@
     $('sb-reload').addEventListener('click', reload);
     $('sb-ext')   .addEventListener('click', () => openExternal(current()));
     $('sb-close') .addEventListener('click', collapse);
+    // editable address bar: type a URL and press Enter to navigate
+    const urlIn = $('sb-url');
+    if (urlIn) urlIn.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      let v = urlIn.value.trim();
+      if (!v) return;
+      if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+      openInSidebar(v);
+      urlIn.blur();
+    });
     const tab = $('sidebar-tab');
     if (tab) tab.addEventListener('click', () => {
       expand();

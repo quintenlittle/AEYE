@@ -50,3 +50,7 @@ Desktop.ini
 
 # ── session migration staging (temporary — delete after migrating) ──
 _incoming/
+
+# build-generated assets (build.py recreates them)
+assets/version_info.txt
+assets/skull_frames/

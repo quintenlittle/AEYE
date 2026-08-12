@@ -707,6 +707,10 @@ body.eye-hidden .msg.assistant {
   background: var(--panel);
   align-items: center;
 }
+/* composer is a full-width bottom bar (moved out of #chat-panel so it spans
+   under the browser sidebar too). Hide it while imagine/dream is up -- those
+   panels carry their own prompt controls. */
+body:has(#chat-panel.hidden) #composer { display: none; }
 #input { flex: 1; resize: none; height: 28px; line-height: 18px; padding: 4px 8px; overflow: hidden; }
 /* live dictation: the box glows while words stream in from the mic */
 #input.dictating { border-color: var(--vein); box-shadow: 0 0 8px rgba(255, 95, 86, 0.45); color: var(--fg); }

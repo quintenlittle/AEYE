@@ -63,6 +63,7 @@ WEBVIEW_DIR = os.path.join(DATA_DIR, ".webview")
 
 def _ensure_dirs() -> None:
     for d in (DATA_DIR, MEMORY_DIR, PLUGINS_DIR,
+              os.path.join(DATA_DIR, "browser-css"),   # per-site sidebar-browser CSS
               os.path.join(MEMORY_DIR, "docs", "files"),
               os.path.join(MEMORY_DIR, "docs", "chunks"),
               os.path.join(MEMORY_DIR, "docs", "vectors")):

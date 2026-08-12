@@ -5329,6 +5329,142 @@ async def web_fetch(req: WebFetchReq):
     return await _web_fetch_page(req.url, (req.query or "").strip())
 
 
+# ---- sidebar browser proxy ----------------------------------------------
+# Fetches a page server-side (SSRF-guarded, re-validated on every redirect hop
+# like fetch_url), strips X-Frame-Options / frame-ancestors so the sidebar
+# <iframe> can embed it, drops ad/tracker <script>/<iframe> tags, and injects a
+# <base> plus an OLED theme + cosmetic ad-hiding so the page matches the app.
+# USER-DRIVEN only (fetches nothing but the URL the user navigates to; no
+# background calls). Dynamic/JS-heavy sites degrade to a reader-grade view --
+# the sidebar's external-open button hands those to the system browser.
+_BROWSE_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+_BROWSE_AD_HOSTS = (
+    "doubleclick.net", "googlesyndication.com", "adservice.google", "ads.youtube.com",
+    "google-analytics.com", "googletagmanager.com", "adnxs.com", "taboola.com",
+    "outbrain.com", "scorecardresearch.com", "amazon-adsystem.com", "adsafeprotected.com",
+    "moatads.com", "criteo.", "pubmatic.com", "rubiconproject.com", "2mdn.net",
+    "quantserve.com", "adroll.com", "casalemedia.com", "openx.net", "sharethrough.com",
+)
+_BROWSE_CSS = (
+    '<style id="aeye-browse-theme">'
+    "html,body{background:#000 !important;color:#00ff88 !important}"
+    "body *{background-color:transparent !important;color:#00ff88 !important;"
+    "border-color:#0a4020 !important;box-shadow:none !important;text-shadow:none !important}"
+    "a,a *{color:#5cffb0 !important}"
+    "img,video,picture,svg,canvas,iframe{background:#000 !important}"
+    "input,textarea,select,button{background:#061a10 !important;color:#00ff88 !important}"
+    '[id*="ad-" i],[id^="ad" i],[class*="advert" i],[class*="-ads" i],'
+    '[class*="sponsor" i],ins.adsbygoogle,[id*="google_ads" i],'
+    'iframe[src*="ads" i],iframe[src*="doubleclick" i],[class*="cookie" i],'
+    '[class*="consent" i],[class*="paywall" i],[class*="newsletter" i],'
+    '[class*="promo" i],[aria-label*="advert" i]{display:none !important}'
+    # force a black + green scrollbar on every browsed page. scrollbar-color
+    # (modern Chromium) forces it even over sites that style their own; the
+    # ::-webkit rules are the fallback for older engines.
+    "html{scrollbar-color:#0a4020 #000 !important;scrollbar-width:thin}"
+    "::-webkit-scrollbar{width:11px;height:11px}"
+    "::-webkit-scrollbar-track{background:#000 !important}"
+    "::-webkit-scrollbar-thumb{background:#0a4020 !important;border-radius:5px}"
+    "::-webkit-scrollbar-thumb:hover{background:#00ff88 !important}"
+    "::-webkit-scrollbar-corner{background:#000 !important}"
+    "</style>"
+)
+_BROWSE_JS = (
+    '<script id="aeye-browse-clean">(function(){try{'
+    "function c(){document.querySelectorAll('body *').forEach(function(el){"
+    "var s=getComputedStyle(el);"
+    "if((s.position==='fixed'||s.position==='sticky')&&el.offsetHeight>window.innerHeight*0.6)"
+    "el.style.setProperty('display','none','important');});}"
+    "if(document.readyState!=='loading')c();else addEventListener('DOMContentLoaded',c);"
+    "setTimeout(c,1500);}catch(e){}})();</script>"
+)
+
+
+def _browse_strip_ads(body: str) -> str:
+    def bad(src: str) -> bool:
+        s = src.lower()
+        return any(h in s for h in _BROWSE_AD_HOSTS)
+    body = re.sub(r'<script\b[^>]*\bsrc=["\']([^"\']*)["\'][^>]*>\s*</script>',
+                  lambda m: "" if bad(m.group(1)) else m.group(0), body, flags=re.I)
+    body = re.sub(r'<iframe\b[^>]*\bsrc=["\']([^"\']*)["\'][^>]*>.*?</iframe>',
+                  lambda m: "" if bad(m.group(1)) else m.group(0), body, flags=re.I | re.S)
+    return body
+
+
+async def _browse_fetch(url: str):
+    """Follow redirects manually, re-running the SSRF guard on every hop."""
+    async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0, connect=6.0), follow_redirects=False,
+            headers={"User-Agent": _BROWSE_UA,
+                     "Accept": "text/html,application/xhtml+xml,image/*,*/*;q=0.8",
+                     "Accept-Language": "en-US,en;q=0.9"}) as client:
+        cur = url
+        for _ in range(6):
+            _web_safe_url(cur)
+            r = await client.get(cur)
+            loc = r.headers.get("location")
+            if r.status_code in (301, 302, 303, 307, 308) and loc:
+                cur = str(httpx.URL(str(r.url)).join(loc))
+                continue
+            return cur, r
+        return cur, r
+
+
+def _browse_user_css(url: str) -> str:
+    """Per-site (and global) user stylesheets injected into browsed pages, so a
+    site can be themed exactly -- e.g. a custom 4chan theme. Files live in
+    DATA_DIR/browser-css/<hostname>.css plus _all.css (editable by the user).
+    Injected AFTER the built-in theme so the user's rules win."""
+    try:
+        host = (_urlparse(url).hostname or "").lower()
+    except Exception:
+        host = ""
+    cdir = os.path.join(paths.DATA_DIR, "browser-css")
+    parts = []
+    for name in (host, "_all"):
+        if not name:
+            continue
+        try:
+            with open(os.path.join(cdir, name + ".css"), encoding="utf-8") as f:
+                parts.append(f.read())
+        except OSError:
+            pass
+    if not parts:
+        return ""
+    return '<style id="aeye-browse-user">' + "\n".join(parts) + "</style>"
+
+
+@app.get("/api/browse")
+async def api_browse(request: Request):
+    raw = (request.query_params.get("url") or "").strip()
+    try:
+        _web_safe_url(raw)
+    except Exception as e:
+        return Response(f"blocked: {e}", status_code=400, media_type="text/plain")
+    try:
+        final, r = await _browse_fetch(raw)
+    except Exception as e:
+        return Response(f"could not load {raw}: {e}", status_code=502,
+                        media_type="text/plain")
+    ctype = (r.headers.get("content-type") or "").lower()
+    # non-HTML (images/pdf/json/xml/...) -> pass through untouched, just no XFO
+    if "html" not in ctype:
+        return Response(
+            r.content,
+            media_type=r.headers.get("content-type") or "application/octet-stream",
+            headers={"Cache-Control": "no-store"})
+    body = _browse_strip_ads(r.text)
+    inject = (f'<base href="{final.replace(chr(34), "%22")}">'
+              '<meta name="referrer" content="no-referrer">'
+              f"{_BROWSE_CSS}{_BROWSE_JS}{_browse_user_css(final)}")
+    m = re.search(r"<head[^>]*>", body, re.I)
+    body = body[:m.end()] + inject + body[m.end():] if m else inject + body
+    # deliberately NO X-Frame-Options / frame-ancestors header -> embeddable
+    return Response(body, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store", "X-AEYE-Browse": "1"})
+
+
 # ---- price tickers -------------------------------------------------------
 # Keyless quotes from Yahoo Finance's chart endpoint. The host is FIXED here
 # (symbols are validated to a safe charset and only ever form the path, never
