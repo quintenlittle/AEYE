@@ -23,6 +23,9 @@ animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 > [release page](https://github.com/quintenlittle/aeye/releases/latest). If Defender
 > false-flags the installer (common for unsigned apps), restore that one file from Windows
 > Security → **Protection history**.
+> Alternatively you can temporarily disable Windows Defender and re-enable after the install.
+
+<img width="870" height="1807" alt="Instructions" src="https://github.com/user-attachments/assets/bd94143d-beb3-4e33-8e73-a3ffb57893a4" />
 
 ## Install
 
