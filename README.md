@@ -12,18 +12,6 @@ thinks, speaks, and gets bloodshot when things go wrong.
 tagged for *your* GPU/RAM (with CPU-only picks), and the GPU-hungry extras — the
 animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 
-```
-             .--''              ''--.
-          .-'      .----------.      '-.
-        .'       .' .--------. '.       '.
-       /        /  /   @@@@   \  \        \
-      ;        |  |   @@@@@@   |  |        ;
-       \        \  \   @@@@   /  /        /
-        '.       '. '--------' .'       .'
-          '-.      '----------'      .-'
-             '--..______________..--'
-```
-
 ## Install
 
 Download and run the latest **`aeye-setup-v*.exe`** — one guided installer that
