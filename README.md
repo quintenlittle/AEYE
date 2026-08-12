@@ -12,9 +12,11 @@ thinks, speaks, and gets bloodshot when things go wrong.
 tagged for *your* GPU/RAM (with CPU-only picks), and the GPU-hungry extras — the
 animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 
+> **▶ [Download the latest installer](https://github.com/quintenlittle/aeye/releases/latest)** — Windows 10/11 · one guided setup · ~73 MB
+
 ## Install
 
-Download and run the latest **`aeye-setup-v*.exe`** — one guided installer that
+Download and run the latest **[`aeye-setup-v*.exe`](https://github.com/quintenlittle/aeye/releases/latest)** — one guided installer that
 sets everything up in a single pass:
 
 1. The **app and its bundled Python runtime** — nothing to install just to *run* it
