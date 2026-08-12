@@ -166,7 +166,22 @@ if (!localStorage.getItem('aeye-default-v3')) {
       </div>
       <div id="vid-canvas">the eye will dream here</div>
     </section>
+    <aside id="sidebar" class="collapsed" aria-hidden="true">
+      <div id="sidebar-head">
+        <button id="sb-back" class="sb-btn" title="Back" aria-label="Back">&lsaquo;</button>
+        <button id="sb-fwd" class="sb-btn" title="Forward" aria-label="Forward">&rsaquo;</button>
+        <button id="sb-reload" class="sb-btn" title="Reload" aria-label="Reload">&#10227;</button>
+        <input id="sb-url" readonly spellcheck="false" title="Current page" placeholder="browser">
+        <button id="sb-ext" class="sb-btn" title="Open in system browser" aria-label="Open externally">&#8599;</button>
+        <button id="sb-close" class="sb-btn" title="Collapse" aria-label="Collapse">&#10005;</button>
+      </div>
+      <div id="sidebar-body">
+        <iframe id="sb-frame" referrerpolicy="no-referrer"
+                allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>
+      </div>
+    </aside>
   </main>
+  <button id="sidebar-tab" title="Open browser sidebar" aria-label="Open browser sidebar">&#9707;</button>
 
   <!-- ============ MANAGE (model mgmt / TTS / STT) ============ -->
   <div class="overlay hidden" id="settings-modal">
@@ -661,6 +676,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/web.js?v=2"></script>
 <script src="/static/ticker.js?v=3"></script>
 <script src="/static/boards.js?v=3"></script>
+<script src="/static/sidebar.js?v=1"></script>
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
 <script src="/static/plugins.js?v=4"></script>
