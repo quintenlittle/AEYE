@@ -40,6 +40,11 @@
   const KEY = 'aeye-tickers';
   const CUSTOM_KEY = 'aeye-tickers-custom';
   const POLL_MS = 60000;                 // prices refresh once a minute -- light
+  // master on/off for the whole price strip (default ON). OFF hides it entirely,
+  // the same way the board-ticker master switch hides that strip.
+  const TICKERS_KEY = 'aeye-price-tickers';
+  const tickersOn = () => localStorage.getItem(TICKERS_KEY) !== '0';
+  const setTickers = (on) => localStorage.setItem(TICKERS_KEY, on ? '1' : '0');
 
   // user-added Yahoo symbols, per side: { commodity:[{sym,label}], crypto:[...] }
   function loadCustom() {
@@ -164,9 +169,14 @@
   async function poll() {
     const left = $('ticker-left'), right = $('ticker-right');
     if (!left || !right) return;
+    const bar = $('ticker-bar');
+    if (!tickersOn()) {                      // master toggle off -> hide the strip
+      if (bar) bar.classList.add('hidden');
+      return;
+    }
+    if (bar) bar.classList.remove('hidden');
     const cSyms = enabledSyms('commodity'), kSyms = enabledSyms('crypto');
 
-    const bar = $('ticker-bar');
     if (!webOn()) {                         // default state: one centered badge
       if (bar) bar.classList.add('off');
       renderOffline(left);
@@ -281,6 +291,12 @@
 
   function wire() {
     rebuildCfg();
+    // master show/hide toggle for the price strip
+    const ptEnable = $('price-ticker-enable');
+    if (ptEnable) {
+      ptEnable.checked = tickersOn();
+      ptEnable.addEventListener('change', () => { setTickers(ptEnable.checked); poll(); });
+    }
     const addBtn = $('ticker-add-btn');
     if (addBtn) addBtn.addEventListener('click', addCustom);
     const addCode = $('ticker-add-code');

@@ -31,7 +31,10 @@
 
   // ---- helpers -----------------------------------------------------------
 
-  function scrollDown() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+  const autoscrollOn = () => localStorage.getItem('aeye-autoscroll') !== '0';
+  // when auto-scroll is OFF, replies never yank the view to the bottom -- so long
+  // output (e.g. an RSS feed) stays readable from the top
+  function scrollDown() { if (autoscrollOn()) messagesEl.scrollTop = messagesEl.scrollHeight; }
 
   // images: array of data URLs (data:image/...;base64,XXXX)
   function bubble(role, text, images) {
@@ -1037,6 +1040,15 @@
       rem.addEventListener('change', () => {
         localStorage.setItem('aeye-remember-sysprompt', rem.checked ? '1' : '0');
         if (rem.checked) save(); else localStorage.removeItem('aeye-sysprompt');
+      });
+    }
+    // auto-scroll toggle (default ON). OFF keeps your scroll position while a
+    // reply streams -- so you can read long output from the top.
+    const autoscroll = $('autoscroll-toggle');
+    if (autoscroll) {
+      autoscroll.checked = localStorage.getItem('aeye-autoscroll') !== '0';
+      autoscroll.addEventListener('change', () => {
+        localStorage.setItem('aeye-autoscroll', autoscroll.checked ? '1' : '0');
       });
     }
   })();

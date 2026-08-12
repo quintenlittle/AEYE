@@ -258,9 +258,10 @@
   // logic changed between versions) and reflect state into the controls.
 
   const saved = localStorage.getItem('aeye-theme');
-  const name = PRESETS.includes(saved) ? saved : 'dark';
+  const name = PRESETS.includes(saved) ? saved : 'oled';   // default = OLED
   const cfg = loadCustom() || DEFAULT_CUSTOM;
   fillInputs(cfg);
   if (name === 'custom') apply('custom', cfg);
+  else if (!saved) apply('oled');   // first launch, nothing saved -> persist OLED
   markPreset(name);
 })();

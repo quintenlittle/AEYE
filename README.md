@@ -384,6 +384,44 @@ Environment variables (set before running `start.bat`):
 | `AEYE_HOST` | `127.0.0.1`              | Bind address               |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Where Ollama is listening  |
 
+## Header tickers
+
+Two rows of scrolling strips along the top of the window (opt-in, gated behind
+**web access**):
+
+- **Price tickers** — commodities (left, drifting right→left) and crypto (right,
+  left→right), quoted from Yahoo Finance and refreshed each minute. Choose which
+  symbols show, or hide the whole strip, in *manage ▸ settings ▸ Price tickers*.
+- **Board tickers** — one lane per 4chan board (defaults `/pol/ /g/ /v/ /x/`),
+  showing recent thread **titles only**; click a title to open the thread in your
+  system browser. Per-lane scroll direction and titles-per-lane are configurable.
+  **Off by default.**
+
+4chan's API can't be read directly from the app, so the board strips fetch through
+a **feed relay** you pick (*settings ▸ Board tickers ▸ relay mode*):
+
+- **off** (default) — board strips stay dark.
+- **local** — the bundled `aeye-4chan-relay.py` runs a tiny CORS relay on
+  `127.0.0.1:8788`, entirely on your machine. The installer can register it to
+  start hidden at login (opt-in), or run it yourself:
+  `pythonw %APPDATA%\AEYE\relay\aeye-4chan-relay.py`.
+- **custom** — any RSS-Bridge or CORS-proxy URL template (`{board}` / `{url}`
+  placeholders); the ticker parses either 4chan JSON or RSS/Atom.
+
+### RSS reader plugin
+
+The bundled `rss` plugin prints RSS/Atom feeds in chat. Links from **paywalled**
+domains are auto-wrapped through `archive.is` for 1-click archiving; manage the
+allowlist with `rss paywall list | add <domain> | remove <domain> | reset`
+(persisted in `paywalls.json` beside the plugin).
+
+### Display settings
+
+The default theme is **OLED** (true black). Under *settings ▸ Display*,
+**auto-scroll chat to newest** can be turned off so long output (like an RSS feed)
+stays readable from the top. Your API keys live in `%APPDATA%\AEYE`
+(`hf_token.txt` for HuggingFace, `web_keys.txt` for web/RSS keys).
+
 ## Layout
 
 ```
@@ -394,6 +432,7 @@ aeye/
 ├── start.bat            launches server + browser (alternative to aeye.bat)
 ├── server.py            FastAPI server (Ollama proxy + HF backend)
 ├── desktop.py           desktop entrypoint (server + UI in a native window)
+├── aeye-4chan-relay.py  local CORS relay for the board tickers (opt-in)
 ├── requirements.txt     core deps (incl. pywebview desktop shell)
 ├── requirements-hf.txt  optional HuggingFace deps (transformers<5)
 ├── requirements-img.txt optional image-gen deps (diffusers)

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=2">
+<link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body data-state="idle">
 <script>
@@ -22,8 +22,8 @@ if (!localStorage.getItem('aeye-default-v3')) {
    of the wrong palette. Presets are pure CSS (data-theme on <html>); a
    custom theme replays the variable map theme.js cached on last save. */
 (function () {
-  var t = localStorage.getItem('aeye-theme');
-  if (!t || t === 'dark') return;
+  var t = localStorage.getItem('aeye-theme') || 'oled';   // first launch -> OLED
+  if (t === 'dark') return;
   document.documentElement.dataset.theme = t;
   if (t !== 'custom') return;
   try {
@@ -38,6 +38,7 @@ if (!localStorage.getItem('aeye-default-v3')) {
       <div class="tick-lane" id="ticker-left"><div class="tick-track"></div></div>
       <div class="tick-lane" id="ticker-right"><div class="tick-track"></div></div>
     </div>
+    <div id="board-bar"></div>
     <div id="knobs">
       <label title="Sampling temperature">temp
         <input id="temp" type="range" min="0" max="2" step="0.1" value="0.7">
@@ -264,6 +265,11 @@ if (!localStorage.getItem('aeye-default-v3')) {
               </label>
             </div>
             <div class="row">
+              <label class="chk" title="When on, new replies scroll the chat to the newest text as it streams. Turn OFF to keep your scroll position — handy for reading long output (like an RSS feed) from the top.">
+                <input id="autoscroll-toggle" type="checkbox" checked> auto-scroll chat to newest reply
+              </label>
+            </div>
+            <div class="row">
               <label class="vlab" title="Target frame rate for the eye's animation. 60 = your display's native rate (uncapped). A lower cap gives fewer, more evenly-spaced frames — often steadier while a model is generating or the machine is hot — and uses less CPU/GPU.">eye frame rate
                 <input id="eye-fps" type="range" min="15" max="60" step="5" value="60">
                 <span id="eye-fps-val" class="mini-status" style="min-height:0">60 fps</span>
@@ -283,6 +289,11 @@ if (!localStorage.getItem('aeye-default-v3')) {
           </fieldset>
           <fieldset id="ticker-box">
             <legend>Price tickers</legend>
+            <div class="row board-master">
+              <label class="chk" title="Show or hide the commodity + crypto price strips at the top of the window">
+                <input id="price-ticker-enable" type="checkbox"> show price tickers (commodities + crypto)
+              </label>
+            </div>
             <div class="fieldset-hint">Scrolling price tickers along the top of the window — commodities on the left, crypto on the right. They fetch prices (Yahoo Finance, with CoinGecko as a crypto fallback; refreshed each minute) <strong>only while web access above is on</strong> — so they inherit the same opt-in and stay silent while the app is offline; when web is off or unreachable each strip reads <span style="color:var(--vein)">ticker offline</span>. Pick which symbols show:</div>
             <div class="ticker-cfg">
               <div class="ticker-cfg-col">
@@ -309,6 +320,66 @@ if (!localStorage.getItem('aeye-default-v3')) {
                   &bull; commodities: <code>CL=F</code> oil, <code>GC=F</code> gold, <code>NG=F</code> gas<br>
                   &bull; forex: <code>EURUSD=X</code><br>
                   &bull; crypto: <code>BTC-USD</code>, <code>ETH-USD</code> (always <code>-USD</code>)</div>
+              </div>
+            </div>
+          </fieldset>
+          <fieldset id="boards-box">
+            <legend>Board tickers</legend>
+            <div class="fieldset-hint">Extra scrolling strips <strong>under</strong> the price tickers — one lane per 4chan board, showing thread <b>titles only</b> (click a title to open the thread). 4chan can't be read directly, so the strips fetch through a <b>feed relay</b>: the bundled <b>local</b> relay (runs on your machine, fully private) or your own <b>custom</b> relay. <strong>Everything is off by default</strong> — the strips run only when web access (above) is on, the master switch below is on, and a relay mode other than “off” is picked.</div>
+            <div class="row board-master">
+              <label class="chk" title="Master switch for the whole board/RSS ticker system">
+                <input id="board-rss-enable" type="checkbox"> enable board tickers (RSS)
+              </label>
+              <label class="board-mode-lab">relay mode
+                <select id="board-relay-mode" title="Where titles are fetched from">
+                  <option value="off">off</option>
+                  <option value="local">local (127.0.0.1:8788)</option>
+                  <option value="custom">custom</option>
+                </select>
+              </label>
+              <button id="board-relay-local" type="button" class="board-relay-local">use local relay</button>
+              <button id="board-relay-test" type="button" title="Check whether the relay is reachable">test</button>
+            </div>
+            <div class="mini-status" id="board-relay-status" style="min-height:0"></div>
+            <div class="boards-cfg">
+              <div class="boards-cfg-col">
+                <div class="ticker-cfg-head">boards</div>
+                <div id="boards-list" class="boards-list"></div>
+                <div class="board-add">
+                  <input id="board-add-id" placeholder="board e.g. pol, g, v, x" spellcheck="false" autocomplete="off" maxlength="10">
+                  <select id="board-add-dir" title="Scroll direction for this lane">
+                    <option value="rl">right →</option>
+                    <option value="lr">← left</option>
+                  </select>
+                  <button id="board-add-btn" type="button">add</button>
+                </div>
+                <div class="mini-status" id="board-add-status" style="min-height:0"></div>
+                <label class="board-max-lab">titles per lane
+                  <input id="board-max" type="number" min="5" max="50" step="1" value="20">
+                </label>
+              </div>
+              <div class="boards-cfg-col board-relay-col">
+                <div class="ticker-cfg-head">custom relay</div>
+                <div id="board-relay-custom">
+                  <div class="board-relay">
+                    <input id="board-relay-url" placeholder="relay URL template" spellcheck="false" autocomplete="off">
+                    <button id="board-relay-save" type="button">save</button>
+                  </div>
+                  <div class="ticker-add-help">Use <code>{board}</code> and/or <code>{url}</code> as placeholders:<br>
+                    &bull; RSS-Bridge: <code>https://host/?action=display&amp;bridge=FourChan&amp;b={board}&amp;format=Atom</code><br>
+                    &bull; CORS proxy: <code>https://host/?url={url}</code></div>
+                </div>
+                <div class="ticker-add-help" style="margin-top:10px"><b>Local relay</b> (recommended, private): the bundled <code>aeye-4chan-relay.py</code> in <code>%APPDATA%\AEYE\relay</code> — it autostarts at login if you enabled that in the installer. Then set relay mode to <b>local</b>.</div>
+              </div>
+            </div>
+            <div class="api-keys-note">
+              <div class="ticker-cfg-head">API keys location</div>
+              <div class="fieldset-hint" style="margin-top:2px">Your keys live in <code>%APPDATA%\AEYE</code> — never in Program Files, never bundled in the installer:<br>
+                &bull; <code>hf_token.txt</code> — HuggingFace token<br>
+                &bull; <code>web_keys.txt</code> — web search / RSS API keys</div>
+              <div class="row" style="margin-top:6px; align-items:center; gap:8px">
+                <button id="open-appdata" type="button">open keys folder</button>
+                <span class="mini-status" id="appdata-status" style="min-height:0"></span>
               </div>
             </div>
           </fieldset>
@@ -578,7 +649,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 
 <script src="/static/eye.js?v=2"></script>
 <script src="/static/game.js?v=2"></script>
-<script src="/static/chat.js?v=2"></script>
+<script src="/static/chat.js?v=3"></script>
 <script src="/static/library.js?v=2"></script>
 <script src="/static/imagine.js?v=2"></script>
 <script src="/static/dream.js?v=2"></script>
@@ -588,16 +659,18 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/memory.js?v=2"></script>
 <script src="/static/docs.js?v=2"></script>
 <script src="/static/web.js?v=2"></script>
-<script src="/static/ticker.js?v=2"></script>
-<script src="/static/theme.js?v=2"></script>
+<script src="/static/ticker.js?v=3"></script>
+<script src="/static/boards.js?v=3"></script>
+<script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
-<script src="/static/plugins.js?v=3"></script>
+<script src="/static/plugins.js?v=4"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>
-/* replace the native white number-spinner on ctx/max (and the imagine
-   steps/guidance/seed inputs) with themed green arrows */
+/* replace the native white number-spinner on EVERY number input (header knobs,
+   imagine/dream controls, settings like "titles per lane") with the themed green
+   arrows -- one global rule so the styling can never drift between controls */
 (function () {
-  document.querySelectorAll('#knobs input[type="number"], #imagine-controls input[type="number"], #dream-controls input[type="number"]').forEach(function (inp) {
+  document.querySelectorAll('input[type="number"]').forEach(function (inp) {
     if (inp.closest('.num-wrap')) return;
     var wrap = document.createElement('span');
     wrap.className = 'num-wrap';

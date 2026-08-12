@@ -1,7 +1,7 @@
 {
   "name": "RSS reader",
   "trigger": "rss",
-  "description": "Fetch RSS/Atom feeds and print them cleanly. 'rss' for the default feeds, or 'rss <url>' for a specific one. Edit DEFAULT_FEEDS in plugin.js.",
+  "description": "Fetch RSS/Atom feeds and print them cleanly. 'rss' for the default feeds, or 'rss <url>' for a specific one. Links from paywalled domains are auto-wrapped via archive.is; manage that list with 'rss paywall list|add <domain>|remove <domain>|reset'. Edit DEFAULT_FEEDS in plugin.js.",
   "command": ["node", "plugin.js", "{query}"],
   "mode": "stream"
 }

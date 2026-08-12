@@ -17,6 +17,10 @@
 
   const $ = (id) => document.getElementById(id);
 
+  // respect the chat auto-scroll toggle (Settings > Display). When off, streamed
+  // plugin output (e.g. an RSS feed) must NOT yank the view to the bottom.
+  const autoscrollOn = () => localStorage.getItem('aeye-autoscroll') !== '0';
+
   let plugins = [];          // last /api/plugins/list result
   let loaded = false;
 
@@ -75,7 +79,7 @@
       const append = (s) => {
         acc += (acc ? '\n' : '') + s;
         out.body.textContent = acc;
-        out.div.scrollIntoView({ block: 'end' });
+        if (autoscrollOn()) out.div.scrollIntoView({ block: 'end' });
       };
       for await (const ev of CHAT.sse(res)) {
         if (ev.error) throw new Error(ev.error);       // chat.js appends [error]
@@ -120,7 +124,7 @@
     if (!session) return;
     session.acc += text;
     session.bubble.body.textContent = session.acc;
-    session.bubble.div.scrollIntoView({ block: 'end' });
+    if (autoscrollOn()) session.bubble.div.scrollIntoView({ block: 'end' });
   }
 
   async function startSession(plugin, query, commandText) {

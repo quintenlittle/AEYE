@@ -217,6 +217,7 @@ button:disabled { opacity: .4; cursor: default; }
    and the pair looks lopsided until web access is enabled */
 #ticker-bar.off #ticker-right { display: none; }
 #ticker-bar.off #ticker-left { flex-basis: 100%; justify-content: center; }
+#ticker-bar.hidden { display: none; }    /* master price-ticker toggle off */
 
 /* ticker symbol picker (manage > settings) */
 .ticker-cfg { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 6px; }
@@ -250,6 +251,55 @@ button:disabled { opacity: .4; cursor: default; }
   color: var(--fg); background: var(--well);
   padding: 0 3px; border-radius: 2px; font-size: 10px;
 }
+
+/* ---------------- board tickers (under the price tickers) ---------------- */
+#board-bar { display: flex; flex-direction: column; width: 100%; }
+#board-bar.off { display: none; }               /* web off -> no board strips */
+.board-lane { flex: none; width: 100%; }
+.board-lane + .board-lane { margin-top: 2px; }
+/* the clickable thread title -- pill border/padding come from .tick */
+.tk-title {
+  color: var(--fg); text-decoration: none; letter-spacing: .3px; cursor: pointer;
+}
+.tk-title:hover { color: var(--accent); }
+.tk-board:hover { border-color: var(--accent); }
+.tk-bd { color: var(--sclera); font-size: 10px; margin-right: 7px; letter-spacing: 1px; }
+.tk-board-notice { color: var(--sclera); letter-spacing: .5px; }
+.tk-board-notice.warn { color: var(--vein); border-color: var(--vein); }
+
+/* board ticker settings (manage > settings) */
+.boards-cfg { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 6px; }
+.boards-cfg-col { min-width: 200px; }
+.board-relay-col { flex: 1 1 300px; min-width: 260px; }
+.boards-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.board-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.board-row .chk { font-size: 12px; align-items: center; min-width: 64px; }
+.board-dir {
+  font-size: 10px; padding: 1px 7px; border: 1px solid var(--line);
+  border-radius: 3px; background: none; color: var(--sclera); letter-spacing: .5px;
+}
+.board-dir:hover { border-color: var(--accent); color: var(--accent); }
+.board-add, .board-relay {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px;
+}
+.board-add #board-add-id { flex: 1 1 120px; min-width: 100px; }
+.board-add #board-add-btn,
+.board-relay #board-relay-save { color: var(--accent); border-color: var(--accent); }
+.board-relay #board-relay-url { flex: 1 1 220px; min-width: 160px; }
+.board-max-lab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; margin-top: 8px; color: var(--sclera);
+}
+.board-max-lab #board-max { width: 64px; }
+.board-relay-test { color: var(--sclera); }
+.board-relay-local { font-size: 11px; color: var(--accent); border-color: var(--accent); }
+.mini-status.ok { color: var(--gain); }
+.board-master { align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+.board-mode-lab {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sclera);
+}
+.api-keys-note { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.api-keys-note code { color: var(--fg); background: var(--well); padding: 0 3px; border-radius: 2px; }
 
 #knobs { gap: 14px; row-gap: 8px; }
 
@@ -330,10 +380,11 @@ button:disabled { opacity: .4; cursor: default; }
 #max-tokens { width: 70px; }
 
 /* ctx / max: hide the native white spinner box, use themed green arrows */
-#knobs input[type="number"]::-webkit-inner-spin-button,
-#knobs input[type="number"]::-webkit-outer-spin-button,
-#imagine-controls input[type="number"]::-webkit-inner-spin-button,
-#imagine-controls input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+/* hide the native spinner on EVERY number input (the green arrows overlay
+   replaces it) -- global, so it can't reappear on hover in settings etc. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
 .num-wrap { position: relative; display: inline-flex; align-items: center; }
 .num-wrap > input[type="number"] { padding-right: 16px; }
 .num-arrows {
