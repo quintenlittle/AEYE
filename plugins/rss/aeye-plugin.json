@@ -1,0 +1,7 @@
+{
+  "name": "RSS reader",
+  "trigger": "rss",
+  "description": "Fetch RSS/Atom feeds and print them cleanly. 'rss' for the default feeds, or 'rss <url>' for a specific one. Edit DEFAULT_FEEDS in plugin.js.",
+  "command": ["node", "plugin.js", "{query}"],
+  "mode": "stream"
+}

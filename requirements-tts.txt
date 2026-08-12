@@ -1,0 +1,7 @@
+# Piper local neural text-to-speech.
+# Voice models are downloaded on demand from the rhasspy/piper-voices repo.
+piper-tts
+onnxruntime
+huggingface_hub
+# Horror voice-effect chains (pitch/ring-mod/detune/bitcrush/distortion/reverb).
+pedalboard

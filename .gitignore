@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────
+#  AEYE — .gitignore
+#  Excludes secrets, build output, caches, and large/regenerable data.
+# ─────────────────────────────────────────────────────────────
+
+# ── SECRETS / TOKENS — never commit ──
+hf_token.txt
+web_keys.txt
+*.pem
+*.key
+
+# ── build / packaged output ──
+dist/
+build/
+installer/Output/
+aeye-setup-*.exe
+*.spec.bak
+
+# ── python bytecode / caches ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ── virtual environments / sidecar extras ──
+venv/
+.venv/
+env/
+extras/
+
+# ── runtime data / logs / caches ──
+*.log
+catalog_cache.json
+.aeye_state.json
+memory/
+
+# ── model / HF caches (large, regenerable) ──
+hf-cache/
+*.gguf
+*.safetensors
+*.pt
+*.onnx
+*.bin
+
+# ── OS cruft ──
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ── session migration staging (temporary — delete after migrating) ──
+_incoming/

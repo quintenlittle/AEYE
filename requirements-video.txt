@@ -1,0 +1,11 @@
+# Text-to-video generation (AnimateDiff / ModelScope / Zeroscope / LTX-Video /
+# CogVideoX / Wan via diffusers). Shares the image stack (torch is installed
+# separately by install.bat for the right CPU/CUDA build); the extras here are
+# just the mp4 encoder used by diffusers' export_to_video. Without them the app
+# still produces clips, falling back to an animated GIF written with Pillow.
+diffusers>=0.31
+transformers>=4.44,<5
+accelerate>=0.33
+safetensors
+imageio
+imageio-ffmpeg

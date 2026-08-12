@@ -1,0 +1,13 @@
+# Optional: better readable-text extraction for the web "fetch page" tool.
+# trafilatura pulls the main article out of a page (dropping nav/ads/boilerplate)
+# far more cleanly than the stdlib fallback AEYE uses when it's absent.
+#
+# Web search itself needs NOTHING here -- it runs on httpx (already a core dep)
+# against DuckDuckGo keyless, or a Tavily/Brave/SerpAPI key from web_keys.txt.
+# So this file is purely a quality upgrade for fetch_url; the feature works
+# without it.
+#
+# Reminder: web access is OFF by default and is the ONE feature that sends data
+# off the machine (only when you turn it on, and only the query/URL the model
+# asks for).
+trafilatura

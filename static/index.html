@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AEYE &mdash; the all-seeing LLM container</title>
+<link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body data-state="idle">
+<script>
+/* one-time migration of saved prefs from the OCULUS days */
+for (const k of Object.keys(localStorage))
+  if (k.indexOf('oculus-') === 0 && localStorage.getItem('aeye-' + k.slice(7)) === null)
+    localStorage.setItem('aeye-' + k.slice(7), localStorage.getItem(k));
+/* one-time default model seed -- afterwards the last model used always wins.
+   (v3: default is now dolphin-mistral, packaged/pulled by the installer) */
+if (!localStorage.getItem('aeye-default-v3')) {
+  localStorage.setItem('aeye-model', 'ollama::dolphin-mistral:latest');
+  localStorage.setItem('aeye-default-v3', '1');
+}
+/* replay the saved theme BEFORE the page paints so there is never a flash
+   of the wrong palette. Presets are pure CSS (data-theme on <html>); a
+   custom theme replays the variable map theme.js cached on last save. */
+(function () {
+  var t = localStorage.getItem('aeye-theme');
+  if (!t || t === 'dark') return;
+  document.documentElement.dataset.theme = t;
+  if (t !== 'custom') return;
+  try {
+    var v = JSON.parse(localStorage.getItem('aeye-theme-vars') || '{}');
+    for (var k in v) document.documentElement.style.setProperty(k, v[k]);
+  } catch (e) { /* corrupt cache -- theme.js rebuilds it on load */ }
+})();
+</script>
+
+  <header>
+    <div id="ticker-bar" aria-hidden="true">
+      <div class="tick-lane" id="ticker-left"><div class="tick-track"></div></div>
+      <div class="tick-lane" id="ticker-right"><div class="tick-track"></div></div>
+    </div>
+    <div id="knobs">
+      <label title="Sampling temperature">temp
+        <input id="temp" type="range" min="0" max="2" step="0.1" value="0.7">
+        <span id="temp-val">0.7</span>
+      </label>
+      <button id="modelfile-btn" title="View / edit a Modelfile">modelfile</button>
+      <button id="create-btn" title="Create a model from the Modelfile in the editor">create</button>
+      <label title="Max tokens to generate — covers a reasoning model's hidden thinking AND its visible answer. Default -1 = no limit (generate until the model stops or the context fills). Set a positive number to cap it.">max
+        <input id="max-tokens" type="number" value="-1" min="-1" step="256">
+      </label>
+      <label title="Context window (tokens) sent to Ollama — must hold the prompt PLUS the entire reply, including a reasoning model's chain-of-thought. Auto-grows to fit an oversized PROMPT, but a long reply/reasoning must fit here: raise this if a reasoning model stalls mid-thought.">ctx
+        <input id="num-ctx" type="number" value="16384" min="512" step="512">
+      </label>
+      <button id="clear" title="Clear conversation">clear</button>
+      <div id="sysmon" title="Live system usage — CPU / RAM / GPU / VRAM / network"></div>
+      <div id="clock" title="Local system date &amp; time"></div>
+    </div>
+    <div id="badges">
+      <span class="badge" id="ollama-badge">ollama: &hellip;</span>
+      <span class="badge" id="hf-badge">hf: &hellip;</span>
+      <span class="badge" id="img-badge" title="Image-generation pipeline">img: &hellip;</span>
+      <span class="badge" id="vid-badge" title="Video-generation pipeline">vid: &hellip;</span>
+      <span class="badge" id="hw-badge" title="Detected hardware">scanning hw&hellip;</span>
+    </div>
+    <div id="model-bar">
+      <select id="model-select" title="Active model"></select>
+      <button id="refresh" title="Refresh model list">&#8635;</button>
+      <div id="nav-group">
+        <button id="manage-btn" title="Model management, voice &amp; dictation settings">manage</button>
+        <button id="library-btn" title="Browse the full model library">library</button>
+        <button id="imagine-btn" title="Generate an image with a loaded diffusion model">imagine</button>
+        <button id="dream-btn" title="Generate a video clip with a loaded text-to-video model">dream</button>
+        <button id="memory-btn" title="Chat memory — saved conversations &amp; projects">memory</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="eye-panel">
+      <pre id="eye" aria-hidden="true"></pre>
+      <div id="eye-status">&#9673; WATCHING</div>
+    </section>
+
+    <section id="chat-panel">
+      <div id="skull-layer" aria-hidden="true"><pre id="skull"></pre></div>
+      <div id="messages"></div>
+      <div id="drop-hint" class="hidden">&#9673; drop image to let the eye see it</div>
+      <div id="attachments" class="hidden"></div>
+      <form id="composer" autocomplete="off">
+        <button id="attach" type="button" title="Attach an image">&#128206;</button>
+        <button id="mic" type="button" title="Dictate with your mic (local Whisper)">&#127908;</button>
+        <button id="tts" type="button" title="Speak replies aloud (local Piper TTS)">&#128264;</button>
+        <textarea id="input" rows="1" spellcheck="true"></textarea>
+        <button id="send" type="submit">&#9654;</button>
+        <input id="file-input" type="file" accept="image/*" multiple hidden>
+      </form>
+    </section>
+
+    <!-- image generation lives in the chat column so the eye stays visible -->
+    <section id="imagine-panel" class="hidden">
+      <div id="imagine-bar">
+        <span class="ig-title">&#9673; IMAGINE</span>
+        <span class="ig-sub" id="img-model-label">no image model loaded &mdash; load one from the library</span>
+        <button id="imagine-back" type="button" title="Back to chat">&#9654; chat</button>
+      </div>
+      <div id="imagine-controls">
+        <textarea id="img-prompt" rows="2" spellcheck="false"
+          placeholder="a lighthouse under an aurora, cinematic, ultra detailed"></textarea>
+        <textarea id="img-negative" rows="1" spellcheck="false"
+          placeholder="negative prompt: blurry, low quality, extra fingers"></textarea>
+        <div class="ig-knobs">
+          <label>steps <input id="img-steps" type="number" value="30" min="1" max="150"></label>
+          <label>guidance <input id="img-guidance" type="number" value="7" min="0" max="20" step="0.5"></label>
+          <label>size
+            <select id="img-size">
+              <option value="512x512">512 &times; 512</option>
+              <option value="768x768">768 &times; 768</option>
+              <option value="1024x1024">1024 &times; 1024</option>
+              <option value="1024x576">1024 &times; 576 (wide)</option>
+              <option value="576x1024">576 &times; 1024 (tall)</option>
+            </select>
+          </label>
+          <label>seed <input id="img-seed" type="number" value="-1" min="-1"></label>
+          <button id="img-generate">&#9673; generate</button>
+          <button id="img-send-chat" disabled>send to chat</button>
+          <a id="img-download" download="aeye.png" class="btn-link hidden">download</a>
+        </div>
+        <div class="mini-status" id="img-status"></div>
+      </div>
+      <div id="img-canvas">the eye will render here</div>
+    </section>
+
+    <!-- video generation shares the chat column too (eye stays visible) -->
+    <section id="dream-panel" class="hidden">
+      <div id="dream-bar">
+        <span class="ig-title">&#9673; DREAM</span>
+        <span class="ig-sub" id="vid-model-label">no video model loaded &mdash; load one from the library</span>
+        <button id="dream-back" type="button" title="Back to chat">&#9654; chat</button>
+      </div>
+      <div id="dream-controls">
+        <textarea id="vid-prompt" rows="2" spellcheck="false"
+          placeholder="a fox running through a snowy forest at dawn, cinematic"></textarea>
+        <textarea id="vid-negative" rows="1" spellcheck="false"
+          placeholder="negative prompt: blurry, low quality, distorted"></textarea>
+        <div class="ig-knobs">
+          <label>steps <input id="vid-steps" type="number" value="25" min="1" max="150"></label>
+          <label>guidance <input id="vid-guidance" type="number" value="7" min="0" max="20" step="0.5"></label>
+          <label>frames <input id="vid-frames" type="number" value="16" min="8" max="128" step="1"></label>
+          <label>fps <input id="vid-fps" type="number" value="8" min="1" max="30" step="1"></label>
+          <label>size
+            <select id="vid-size">
+              <option value="0x0">model default</option>
+              <option value="512x512">512 &times; 512</option>
+              <option value="576x320">576 &times; 320 (wide)</option>
+              <option value="768x432">768 &times; 432 (wide)</option>
+              <option value="320x576">320 &times; 576 (tall)</option>
+            </select>
+          </label>
+          <label>seed <input id="vid-seed" type="number" value="-1" min="-1"></label>
+          <button id="vid-generate">&#9673; generate</button>
+          <button id="vid-send-chat" disabled>send to chat</button>
+          <a id="vid-download" download="aeye.mp4" class="btn-link hidden">download</a>
+        </div>
+        <div class="mini-status" id="vid-status"></div>
+      </div>
+      <div id="vid-canvas">the eye will dream here</div>
+    </section>
+  </main>
+
+  <!-- ============ MANAGE (model mgmt / TTS / STT) ============ -->
+  <div class="overlay hidden" id="settings-modal">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <span class="modal-title">&#9673; MANAGE</span>
+        <span class="modal-sub">models &middot; voice &middot; dictation &mdash; all local</span>
+        <button class="close" data-close="settings-modal">&times;</button>
+      </div>
+      <div class="tabs" id="settings-tabs">
+        <button class="tab on" data-tab="tab-models" type="button">model management</button>
+        <button class="tab" data-tab="tab-tts" type="button">TTS</button>
+        <button class="tab" data-tab="tab-stt" type="button">STT</button>
+        <button class="tab" data-tab="tab-settings" type="button">settings</button>
+        <button class="tab" data-tab="tab-plugins" type="button">plugins</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-panel on" id="tab-models">
+          <fieldset>
+            <legend>Ollama</legend>
+            <div class="row">
+              <input id="pull-name" placeholder="e.g. llama3.2:3b" spellcheck="false">
+              <button id="pull-btn">pull</button>
+            </div>
+            <div class="mini-status" id="pull-status"></div>
+          </fieldset>
+          <fieldset>
+            <legend>HuggingFace</legend>
+            <div class="row">
+              <input id="hf-id" placeholder="e.g. Qwen/Qwen2.5-1.5B-Instruct" spellcheck="false">
+              <label class="chk"><input id="hf-4bit" type="checkbox"> 4-bit</label>
+              <label class="chk" title="Allow a repo to run its own custom model code. Only for repos you trust."><input id="hf-trust" type="checkbox"> trust remote code</label>
+              <button id="hf-btn">load</button>
+              <button id="hf-unload">unload</button>
+            </div>
+            <div class="mini-status" id="hf-status"></div>
+            <div class="fieldset-hint">No login needed for public models (incl. most uncensored ones). Only <em>gated</em> repos (Llama, Gemma&hellip;) need a free <code>HF_TOKEN</code> — see README.</div>
+          </fieldset>
+          <fieldset>
+            <legend>System prompt</legend>
+            <textarea id="system-prompt" rows="4"
+              placeholder="You are a helpful assistant..."></textarea>
+            <div class="row" style="margin-top:6px">
+              <label class="chk" title="Keep this system prompt across restarts instead of clearing it each launch.">
+                <input id="sysprompt-remember" type="checkbox"> remember system prompt
+              </label>
+            </div>
+          </fieldset>
+        </div>
+        <div class="tab-panel" id="tab-tts">
+          <fieldset id="voice-box">
+            <legend>Voice (local Piper TTS)</legend>
+            <div class="row">
+              <label class="vlab">voice
+                <select id="tts-voice"></select>
+              </label>
+              <button id="tts-dl" class="hidden">download</button>
+              <button id="tts-del" class="hidden danger" type="button" title="Delete this downloaded voice to free disk space">&#128465;</button>
+              <button id="tts-test" type="button">test</button>
+              <label class="vlab">effect
+                <select id="tts-effect" title="Fun pitch/character presets applied to any voice"></select>
+              </label>
+              <label class="vlab">rate
+                <input id="tts-rate" type="range" min="0.5" max="2" step="0.05" value="1">
+                <span id="tts-rate-val">1.00</span>
+              </label>
+              <label class="vlab" title="Data-beeps for the radiodemon effect: one every N words (0 = off). Only audible with the radiodemon effect selected.">radiodemon effect beeps
+                <input id="tts-beeps" type="range" min="0" max="10" step="1" value="4">
+                <span id="tts-beeps-val">every 4</span>
+              </label>
+            </div>
+            <div class="fieldset-hint">Fully offline neural speech — nothing leaves this machine. Replies are spoken <b>as they generate</b>, sentence by sentence; use <b>rate</b> to keep pace with the typewriter. Effects: pitch fun (<b>goblin</b>/<b>demon</b>/<b>chipmunk</b>) plus DSP horror chains (<b>dalek</b>, <b>corrupted</b>, <b>radiodemon</b>, <b>possessed</b>, <b>intercom</b>, <b>wraith</b>, <b>hive</b>), and <b>random</b> shuffles the horror effects mid-speech.</div>
+            <div class="mini-status" id="tts-vstatus"></div>
+          </fieldset>
+        </div>
+        <div class="tab-panel" id="tab-stt">
+          <fieldset>
+            <legend>Dictation (local Whisper STT)</legend>
+            <div class="row">
+              <label class="chk" title="Send dictation straight to chat instead of dropping it in the box to edit.">
+                <input id="stt-autosend" type="checkbox"> auto-send dictation
+              </label>
+              <label class="chk" title="Press Space to toggle the mic — but only when the chat box isn't focused, so it never gets confused with typing.">
+                <input id="stt-hotkey" type="checkbox"> mic hotkey (Space)
+              </label>
+            </div>
+            <div class="fieldset-hint">Click the &#127908; mic by the chat box to dictate. Transcription runs 100% on-device (Whisper) — no audio ever leaves this machine. Enable it via the <b>AI extras</b> (Start Menu &#9656; "Install or Repair AI Extras", or <code>install.bat</code> from source). With <b>mic hotkey</b> on, tap <b>Space</b> to start/stop — it's ignored while you're typing in the chat box.</div>
+          </fieldset>
+        </div>
+        <div class="tab-panel" id="tab-settings">
+          <fieldset>
+            <legend>Display</legend>
+            <div class="row">
+              <label class="chk" title="Stop rendering the ASCII eye and give the whole window to the chat. Suspends the animation loop to save GPU.">
+                <input id="hide-eye" type="checkbox"> hide the eye (full-width chat, saves GPU)
+              </label>
+            </div>
+            <div class="row">
+              <label class="vlab" title="Target frame rate for the eye's animation. 60 = your display's native rate (uncapped). A lower cap gives fewer, more evenly-spaced frames — often steadier while a model is generating or the machine is hot — and uses less CPU/GPU.">eye frame rate
+                <input id="eye-fps" type="range" min="15" max="60" step="5" value="60">
+                <span id="eye-fps-val" class="mini-status" style="min-height:0">60 fps</span>
+              </label>
+            </div>
+            <div class="fieldset-hint">The eye is a procedural 78&times;30 grid redrawn every frame. Hiding it pauses that render loop entirely and expands the chat to fill the window. If the eye stutters while a model runs, a lower cap (e.g. 30&ndash;45) is usually <em>steadier</em> than an uneven 60 &mdash; the loop can't exceed your display's refresh rate.</div>
+          </fieldset>
+          <fieldset>
+            <legend>Web access</legend>
+            <div class="row">
+              <label class="chk" title="Let the model reach the internet: search the web and read specific pages for current information. OFF by default — turning it on is the only thing that ever sends data off this machine.">
+                <input id="web-enable" type="checkbox"> allow web search &amp; page fetch
+              </label>
+            </div>
+            <div class="mini-status" id="web-status"></div>
+            <div class="fieldset-hint">When on, the model can emit a search/fetch request that <em>this app</em> runs for it, then reads the results back and answers with citations. <strong>This is the only feature that leaves the machine</strong> — search queries and page URLs go to a third party (DuckDuckGo by default, no key needed; drop a Tavily/Brave/SerpAPI key in <code>web_keys.txt</code> for better results). Nothing is sent while this is off, and only the query/URL the model asks for is ever sent. Fetches to localhost/private hosts are blocked.</div>
+          </fieldset>
+          <fieldset id="ticker-box">
+            <legend>Price tickers</legend>
+            <div class="fieldset-hint">Scrolling price tickers along the top of the window — commodities on the left, crypto on the right. They fetch prices (Yahoo Finance, with CoinGecko as a crypto fallback; refreshed each minute) <strong>only while web access above is on</strong> — so they inherit the same opt-in and stay silent while the app is offline; when web is off or unreachable each strip reads <span style="color:var(--vein)">ticker offline</span>. Pick which symbols show:</div>
+            <div class="ticker-cfg">
+              <div class="ticker-cfg-col">
+                <div class="ticker-cfg-head">commodities (left)</div>
+                <div id="ticker-cfg-commodity" class="ticker-cfg-list"></div>
+              </div>
+              <div class="ticker-cfg-col">
+                <div class="ticker-cfg-head">crypto (right)</div>
+                <div id="ticker-cfg-crypto" class="ticker-cfg-list"></div>
+              </div>
+              <div class="ticker-cfg-col ticker-add-col">
+                <div class="ticker-cfg-head">add your own</div>
+                <div class="ticker-add">
+                  <select id="ticker-add-side" title="Which strip to add it to">
+                    <option value="commodity">commodities (left)</option>
+                    <option value="crypto">crypto (right)</option>
+                  </select>
+                  <input id="ticker-add-code" placeholder="Yahoo symbol e.g. AAPL, ^IXIC, BTC-USD" spellcheck="false" autocomplete="off">
+                  <button id="ticker-add-btn" type="button">add</button>
+                </div>
+                <div class="mini-status" id="ticker-add-status" style="min-height:0"></div>
+                <div class="ticker-add-help">Use the <b>Yahoo Finance</b> symbol:<br>
+                  &bull; stocks/indices: <code>AAPL</code>, <code>^GSPC</code>, <code>^IXIC</code><br>
+                  &bull; commodities: <code>CL=F</code> oil, <code>GC=F</code> gold, <code>NG=F</code> gas<br>
+                  &bull; forex: <code>EURUSD=X</code><br>
+                  &bull; crypto: <code>BTC-USD</code>, <code>ETH-USD</code> (always <code>-USD</code>)</div>
+              </div>
+            </div>
+          </fieldset>
+          <fieldset id="theme-box">
+            <legend>Themes &amp; UI</legend>
+            <div class="row theme-presets">
+              <span class="chk">preset</span>
+              <button class="theme-pick" data-theme="dark" type="button" title="The phosphor CRT default">dark</button>
+              <button class="theme-pick" data-theme="light" type="button" title="Paper terminal — dark ink on a pale page">light</button>
+              <button class="theme-pick" data-theme="oled" type="button" title="True-black backgrounds for OLED panels">oled</button>
+              <button class="theme-pick" data-theme="contrast" type="button" title="Maximum legibility — white on black, bright accents">high contrast</button>
+              <button class="theme-pick" data-theme="custom" type="button" title="Build your own palette from four colors">custom</button>
+            </div>
+            <div id="theme-custom" class="hidden">
+              <div class="theme-row">
+                <label for="theme-primary">primary (eye / identity)</label>
+                <input id="theme-primary" type="color">
+                <input id="theme-primary-hex" type="text" spellcheck="false" maxlength="7">
+              </div>
+              <div class="theme-row">
+                <label for="theme-accent">accent (buttons / glow)</label>
+                <input id="theme-accent" type="color">
+                <input id="theme-accent-hex" type="text" spellcheck="false" maxlength="7">
+              </div>
+              <div class="theme-row">
+                <label for="theme-bg">background</label>
+                <input id="theme-bg" type="color">
+                <input id="theme-bg-hex" type="text" spellcheck="false" maxlength="7">
+              </div>
+              <div class="theme-row">
+                <label for="theme-fg">text</label>
+                <input id="theme-fg" type="color">
+                <input id="theme-fg-hex" type="text" spellcheck="false" maxlength="7">
+              </div>
+              <div class="theme-actions">
+                <button id="theme-reset" type="button" title="Back to the dark phosphor default">reset to default</button>
+                <button id="theme-export" type="button" title="Download the custom palette as JSON">export</button>
+                <button id="theme-import" type="button" title="Load a palette from an exported JSON file">import</button>
+                <input id="theme-import-file" type="file" accept=".json,application/json" hidden>
+              </div>
+            </div>
+            <div class="mini-status" id="theme-note"></div>
+            <div class="fieldset-hint">Changes apply instantly and persist in this browser profile. Panels and borders are derived from your four colors; text is auto-nudged toward black or white if it would be unreadable on your background. The eye's mood colors (thinking, streaming, error&hellip;) ride on top of every theme.</div>
+          </fieldset>
+        </div>
+        <div class="tab-panel" id="tab-plugins">
+          <fieldset>
+            <legend>Installed plugins</legend>
+            <div class="plug-add">
+              <input id="plug-url" placeholder="paste a GitHub repo URL to clone &amp; install&hellip;" spellcheck="false">
+              <button id="plug-clone">clone</button>
+              <button id="plug-new" title="Write a new plugin from scratch">+ new</button>
+            </div>
+            <div id="plug-new-form" class="plug-new hidden">
+              <div class="plug-editor-head">New plugin &mdash; write the code, hit create</div>
+              <div class="plug-new-grid">
+                <label>name <input id="pn-name" spellcheck="false" placeholder="My Tool"></label>
+                <label>trigger <input id="pn-trigger" spellcheck="false" placeholder="mytool"></label>
+                <label>language
+                  <select id="pn-lang">
+                    <option value="node">Node (.js)</option>
+                    <option value="python">Python (.py)</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </label>
+                <label>mode
+                  <select id="pn-mode">
+                    <option value="stream">stream</option>
+                    <option value="terminal">terminal</option>
+                    <option value="interactive">interactive</option>
+                  </select>
+                </label>
+                <label>file <input id="pn-file" spellcheck="false"></label>
+                <label>command <input id="pn-cmd" spellcheck="false" title="argv, space-separated; {query} = the text after your trigger"></label>
+              </div>
+              <textarea id="pn-code" rows="12" spellcheck="false"></textarea>
+              <div class="plug-editor-actions">
+                <button id="pn-create">create</button>
+                <button id="pn-cancel" class="ghost">cancel</button>
+                <span class="mini-status" id="pn-status" style="min-height:0"></span>
+              </div>
+            </div>
+            <div class="plug-bar">
+              <span class="mini-status" id="plug-status" style="min-height:0"></span>
+              <button id="plug-rescan" title="Re-read the plugins folder">rescan</button>
+            </div>
+            <div class="lib-wrap plug-wrap">
+              <table id="plug-table">
+                <thead><tr><th>plugin</th><th>trigger</th><th>runs</th><th>setup</th></tr></thead>
+                <tbody id="plug-body"></tbody>
+              </table>
+            </div>
+            <pre id="plug-log" class="plug-log hidden"></pre>
+            <div id="plug-editor" class="plug-editor hidden">
+              <div class="plug-editor-head">editing <code id="plug-editor-id"></code> /
+                <select id="plug-editor-file" title="pick a file in this plugin to edit"></select></div>
+              <textarea id="plug-editor-text" rows="12" spellcheck="false"></textarea>
+              <div class="plug-editor-actions">
+                <button id="plug-editor-save">save</button>
+                <button id="plug-editor-cancel" class="ghost">cancel</button>
+                <span class="mini-status" id="plug-editor-status" style="min-height:0"></span>
+              </div>
+            </div>
+            <div class="fieldset-hint">
+              <b>+ new:</b> write a plugin from scratch right here &mdash; name it, pick a language (Node/Python), write the
+              code, hit <b>create</b>. It lands in <code>plugins/</code> and opens in the editor.<br>
+              <b>Clone from GitHub:</b> paste a repo URL above and hit <b>clone</b> &mdash; AEYE clones it into
+              <code>plugins/</code> and (if the repo has no manifest) scaffolds one, opening it here to edit. Or drop a
+              repo into the <code>plugins/</code> folder by hand and <b>rescan</b>. Use the editor's file dropdown to edit
+              either the manifest or the code. Then set the tool up:
+              <b>install deps</b> for its <code>requirements.txt</code>, and edit the manifest's <b>command</b>/<b>trigger</b>.<br>
+              In chat, start a message with a plugin's <b>trigger</b> and the rest is passed to the tool (e.g.
+              <code>echo: hello</code>). Plugins run only when <em>you</em> type the trigger, never from a model's reply.<br>
+              Manifest: <code>{ "name", "trigger", "command": ["python","tool.py","{query}"], "mode", "cwd", "timeout" }</code>
+              &mdash; <code>mode</code> is <code>stream</code> (default), <code>terminal</code> (own console) or <code>interactive</code> (in-chat session).
+            </div>
+          </fieldset>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODEL LIBRARY ============ -->
+  <div class="overlay hidden" id="library-modal">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title">&#9673; MODEL LIBRARY</span>
+        <span class="modal-sub" id="lib-hw">scanning hardware&hellip;</span>
+        <button class="close" data-close="library-modal">&times;</button>
+      </div>
+      <div class="lib-online-bar">
+        <input id="lib-online-q" placeholder="search ALL models on HuggingFace + Ollama (any repo, any size)&hellip;" spellcheck="false" autocomplete="off">
+        <button id="lib-online-btn">search hub</button>
+        <button id="lib-online-clear" class="ghost hidden">clear</button>
+      </div>
+      <div id="lib-online" class="hidden"></div>
+      <div class="lib-refresh-line">
+        <span id="lib-refresh-status">&nbsp;</span>
+        <button id="lib-refresh-btn" title="Re-scan HuggingFace + Ollama for the latest trending models">refresh trending</button>
+      </div>
+      <div class="lib-controls">
+        <input id="lib-search" placeholder="filter the curated catalog below&hellip;" spellcheck="false">
+        <label class="lib-sort" title="Sort the catalog">&#8645; sort
+          <select id="lib-sort">
+            <option value="trending">Trending</option>
+            <option value="likes">Most likes</option>
+            <option value="downloads">Most downloads</option>
+            <option value="created">Recently created</option>
+            <option value="updated">Recently updated</option>
+            <option value="params-desc">Most parameters</option>
+            <option value="params-asc">Least parameters</option>
+          </select>
+        </label>
+        <div id="lib-filters">
+          <button data-fit="all" class="on">all</button>
+          <button data-fit="installed" title="Everything downloaded on disk — delete to de-bloat">&#128190; installed</button>
+          <button data-fit="trend">&#128293; trending</button>
+          <button data-fit="unc">uncensored</button>
+          <button data-fit="image">image gen</button>
+          <button data-fit="video">video gen</button>
+          <button data-fit="gpu">fits gpu</button>
+          <button data-fit="cpu">cpu only</button>
+          <button data-fit="no">too big</button>
+        </div>
+      </div>
+      <div class="lib-wrap">
+        <table id="lib-table">
+          <thead><tr>
+            <th>model</th><th>params</th><th>type</th>
+            <th title="HuggingFace likes">&hearts;</th><th>updated</th>
+            <th>size&nbsp;(q4)</th>
+            <th>requirements</th><th>fit</th><th>get</th>
+          </tr></thead>
+          <tbody id="lib-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODELFILE EDITOR ============ -->
+  <div class="overlay hidden" id="modelfile-modal">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <span class="modal-title">&#9673; MODELFILE</span>
+        <span class="modal-sub">edit a model's recipe, then create a new model from it</span>
+        <button class="close" data-close="modelfile-modal">&times;</button>
+      </div>
+      <div class="mf-row">
+        <select id="mf-source" title="Installed Ollama model to read the Modelfile from"></select>
+        <button id="mf-load">load modelfile</button>
+        <span class="spacer"></span>
+        <input id="mf-name" placeholder="new model name" spellcheck="false">
+        <button id="mf-create">create from modelfile</button>
+      </div>
+      <textarea id="mf-editor" rows="16" spellcheck="false"
+placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ctx 4096&#10;SYSTEM You are a terse assistant that answers in riddles."></textarea>
+      <div class="mini-status" id="mf-status"></div>
+    </div>
+  </div>
+
+  <!-- ============ CHAT MEMORY ============ -->
+  <div class="overlay hidden" id="memory-modal">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <span class="modal-title">&#9673; MEMORY</span>
+        <span class="modal-sub">saved conversations, projects &amp; documents &mdash; all local, nothing leaves this machine</span>
+        <button class="close" data-close="memory-modal">&times;</button>
+      </div>
+      <div class="mem-controls">
+        <label class="chk" title="While on, finished exchanges are saved to ./memory on this machine and a briefing is written on exit. While off (the default), nothing is ever recorded.">
+          <input id="mem-toggle" type="checkbox"> remember my chats
+        </label>
+        <label class="mem-ctx-lab" title="What the eye recalls while you talk: a chosen project's briefings, or automatic topic matching across everything remembered.">context
+          <select id="mem-context"></select>
+        </label>
+      </div>
+      <div class="mem-proj-row">
+        <div id="mem-projects" class="mem-chips"></div>
+        <input id="mem-project-name" placeholder="new project name" spellcheck="false">
+        <button id="mem-project-add">+ project</button>
+      </div>
+      <div class="lib-wrap mem-wrap">
+        <table id="mem-table">
+          <thead><tr><th>conversation</th><th>state</th><th>project</th><th></th></tr></thead>
+          <tbody id="mem-body"></tbody>
+        </table>
+      </div>
+      <div class="mini-status" id="mem-status"></div>
+      <div class="docs-bar">
+        <span class="docs-title">&#9707; DOCUMENTS</span>
+        <label class="chk" title="While on, each message is matched against the indexed documents below and the best excerpts are handed to the model as context. Embedding and search run entirely on this machine.">
+          <input id="docs-use" type="checkbox"> use in chat
+        </label>
+        <button id="docs-add">+ add document</button>
+        <input id="docs-file" type="file" multiple accept=".pdf,.txt,.md,.docx" hidden>
+      </div>
+      <div class="lib-wrap docs-wrap">
+        <table id="docs-table">
+          <thead><tr><th>document</th><th>size</th><th>state</th><th></th></tr></thead>
+          <tbody id="docs-body"></tbody>
+        </table>
+      </div>
+      <div class="mini-status" id="docs-status"></div>
+    </div>
+  </div>
+
+  <!-- ============ STARTUP MODEL PICKER ============ -->
+  <div class="overlay hidden" id="startup-modal">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <span class="modal-title">&#9673; RESTORE MODELS</span>
+        <span class="modal-sub">nothing loads on startup &mdash; pick what to bring back</span>
+        <button class="close" data-close="startup-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="startup-options"></div>
+        <div class="startup-actions">
+          <button id="startup-load">load selected</button>
+          <button id="startup-skip" class="ghost">start empty</button>
+        </div>
+        <div class="fieldset-hint">Loading models uses RAM/VRAM, so AEYE no longer restores everything automatically. Pick only what you need now &mdash; you can load anything else anytime from the <b>library</b>. Only the <em>last-used</em> model per category that&rsquo;s still on disk is offered here.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="scanlines" aria-hidden="true"></div>
+
+<script src="/static/eye.js?v=2"></script>
+<script src="/static/game.js?v=2"></script>
+<script src="/static/chat.js?v=2"></script>
+<script src="/static/library.js?v=2"></script>
+<script src="/static/imagine.js?v=2"></script>
+<script src="/static/dream.js?v=2"></script>
+<script src="/static/voice.js?v=2"></script>
+<script src="/static/stt.js?v=2"></script>
+<script src="/static/sysmon.js?v=2"></script>
+<script src="/static/memory.js?v=2"></script>
+<script src="/static/docs.js?v=2"></script>
+<script src="/static/web.js?v=2"></script>
+<script src="/static/ticker.js?v=2"></script>
+<script src="/static/theme.js?v=2"></script>
+<script src="/static/skull.js?v=2"></script>
+<script src="/static/plugins.js?v=3"></script>
+<script src="/static/startup.js?v=2"></script>
+<script>
+/* replace the native white number-spinner on ctx/max (and the imagine
+   steps/guidance/seed inputs) with themed green arrows */
+(function () {
+  document.querySelectorAll('#knobs input[type="number"], #imagine-controls input[type="number"], #dream-controls input[type="number"]').forEach(function (inp) {
+    if (inp.closest('.num-wrap')) return;
+    var wrap = document.createElement('span');
+    wrap.className = 'num-wrap';
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    var arrows = document.createElement('span');
+    arrows.className = 'num-arrows';
+    var mk = function (glyph, dir) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.tabIndex = -1; b.textContent = glyph;
+      b.addEventListener('click', function (e) {
+        e.preventDefault();
+        try { dir > 0 ? inp.stepUp() : inp.stepDown(); } catch (err) {}
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      return b;
+    };
+    arrows.appendChild(mk('▲', 1));    // ▲ up
+    arrows.appendChild(mk('▼', -1));   // ▼ down
+    wrap.appendChild(arrows);
+  });
+})();
+
+/* manage modal: open from the header button + switch tabs (close/backdrop/
+   Escape are handled generically by library.js for every .overlay) */
+(function () {
+  var modal = document.getElementById('settings-modal');
+  if (!modal) return;
+  var tabs = [].slice.call(modal.querySelectorAll('.tab'));
+  function show(id) {
+    tabs.forEach(function (t) { t.classList.toggle('on', t.dataset.tab === id); });
+    modal.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.toggle('on', p.id === id); });
+  }
+  tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab); }); });
+  var btn = document.getElementById('manage-btn');
+  if (btn) btn.addEventListener('click', function () { modal.classList.remove('hidden'); });
+  window.SETTINGS = { open: function (tab) { modal.classList.remove('hidden'); if (tab) show(tab); } };
+})();
+</script>
+</body>
+</html>

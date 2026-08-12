@@ -1,0 +1,11 @@
+# Image generation (Stable Diffusion / SDXL / SD3.5 / FLUX via diffusers).
+# torch is installed separately by install.bat for the right CPU/CUDA build.
+# transformers pinned <5: the 5.x CLIP loader breaks SD text encoders with
+# the current diffusers release.
+diffusers>=0.31
+transformers>=4.44,<5
+accelerate>=0.33
+safetensors
+sentencepiece
+protobuf
+Pillow

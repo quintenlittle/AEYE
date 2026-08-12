@@ -1,0 +1,6 @@
+# Local speech-to-text via faster-whisper (Whisper on CTranslate2).
+# The model downloads once from HuggingFace, then transcription is 100%
+# on-device -- no audio ever leaves the machine. Runs CPU/int8 by default
+# so it never competes with the LLM for VRAM.
+# PyAV (pulled in below) decodes the browser's webm/opus mic recordings.
+faster-whisper

@@ -1,0 +1,9 @@
+# HuggingFace support (torch itself is installed by install.bat so the
+# right CPU/CUDA build is picked for your machine)
+# transformers pinned <5: the 5.x CLIP loader is incompatible with the
+# current diffusers release (breaks Stable Diffusion text encoders).
+transformers>=4.44,<5
+accelerate>=0.33
+safetensors
+sentencepiece
+huggingface_hub

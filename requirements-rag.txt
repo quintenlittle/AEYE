@@ -1,0 +1,9 @@
+# Local document RAG (the DOCUMENTS section of the MEMORY drawer):
+# chunking + embeddings + vector search for uploaded PDF/TXT/MD/DOCX files.
+# The embedding model (all-MiniLM-L6-v2, ~90 MB) downloads once from
+# HuggingFace, then indexing and search are 100% on-device -- documents
+# never leave the machine. Runs CPU-only so it never competes with the
+# LLM for VRAM.
+sentence-transformers
+faiss-cpu            # vector index; the server falls back to numpy if absent
+pypdf                # PDF text extraction (.docx/.txt/.md use the stdlib)

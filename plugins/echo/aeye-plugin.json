@@ -1,0 +1,8 @@
+{
+  "name": "Echo (sample)",
+  "trigger": "echo",
+  "description": "Sample plugin: prints back whatever you type after the trigger. Proves the runner works end to end. Try: echo: hello world",
+  "command": ["python", "echo.py", "{query}"],
+  "cwd": ".",
+  "timeout": 30
+}

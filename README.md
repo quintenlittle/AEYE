@@ -1,0 +1,414 @@
+# ◉ AEYE — the all-seeing LLM container
+
+A local LLM chat container for Windows with a procedurally-rendered **ASCII eye
+that follows your mouse cursor**. Talk to any Ollama model or load HuggingFace
+models directly — the eye watches, thinks, speaks, and gets bloodshot when
+things go wrong.
+
+```
+             .--''              ''--.
+          .-'      .----------.      '-.
+        .'       .' .--------. '.       '.
+       /        /  /   @@@@   \  \        \
+      ;        |  |   @@@@@@   |  |        ;
+       \        \  \   @@@@   /  /        /
+        '.       '. '--------' .'       .'
+          '-.      '----------'      .-'
+             '--..______________..--'
+```
+
+## Install
+
+Double-click **`install.bat`**. It will:
+
+1. Find Python 3 (or offer to install it via winget)
+2. Create a private `.venv`
+3. Install the core app — FastAPI + uvicorn + httpx + pywebview (desktop shell)
+4. Optionally install HuggingFace support — PyTorch (auto-detects NVIDIA GPU
+   for the CUDA build) + transformers + accelerate (+ bitsandbytes for 4-bit)
+   + diffusers image generation
+5. Optionally install Piper neural TTS (local voices)
+6. Optionally install Whisper speech-to-text (local mic dictation)
+7. Install Ollama if missing — via winget, or by downloading the official
+   installer directly when winget isn't available
+8. Optionally pull the default chat model (dolphin-mistral, ~4 GB) so the first
+   launch is ready to talk
+9. Put an **AEYE shortcut on the Desktop** (with the eye icon)
+
+Then run **`aeye.bat`** (or the Desktop shortcut) — AEYE opens **maximized as a
+single desktop window** (server embedded, black title bar, no browser needed).
+Prefer browser mode? **`start.bat`** launches the server and opens
+`http://127.0.0.1:8130` in your browser.
+
+### Moving AEYE to another machine
+
+Run **`package.bat`** — it builds `disteye-portable.zip` containing the whole
+app (sources, installer, icon; no venv, caches, logs or tokens). Copy the zip to
+the new machine, extract anywhere, and double-click `install.bat` inside.
+Models are not packaged: HuggingFace models re-download into the new machine's
+cache, and Ollama models are re-pulled from the library drawer.
+
+### The desktop window
+
+- Starts **maximized**; the title bar and border are painted in the app's own
+  near-black, with the pixel-art eye as the window/taskbar icon.
+- Closing the window kills the server **instantly** (no lingering process, port
+  or VRAM), so relaunches are immediate.
+- Settings (selected model, TTS prefs) persist in a local `.webview` profile
+  next to the app.
+- On startup AEYE **auto-reloads the last chat + image models** (if still on
+  disk) and kicks a trending-library scan — the eye sweeps violet while it
+  scans, amber while weights load.
+
+## The eye
+
+The eye is not an animation — it's a 78×30 character grid recomputed every
+frame (almond aperture, shaded sclera, striated iris, pupil, dual glints,
+eyelids), which is what lets it move smoothly. It:
+
+- **tracks your mouse cursor** anywhere in the window
+- **wanders on its own** when your mouse goes quiet
+- **blinks** at random (click it to force a blink)
+- **dilates** when your cursor gets close
+- **turns amber and spins its iris** while a model thinks or weights load
+- **turns violet with a lazy spin** while scanning the hubs for trending models
+- **turns green and shimmers** while streaming tokens, glancing down at its
+  own words every couple of seconds
+- **turns red and bloodshot** (veins in the sclera) on errors
+- **falls asleep** after 4 minutes of no mouse movement — lids droop and it
+  "breathes"; move the mouse to wake it
+
+## Models
+
+The dropdown always defaults to the **last model you used** (any backend); on a
+fresh install it starts on the house default. In the library, every **model name
+is a link** — click it to open the model's HuggingFace or Ollama page in your
+default browser for an overview and benchmarks.
+
+- **Ollama** — anything Ollama serves shows up in the model dropdown. Pull new
+  models from the drawer (`▸ model management`) with live progress.
+- **HuggingFace** — enter a repo id (e.g. `Qwen/Qwen2.5-1.5B-Instruct`) in the
+  drawer and hit *load*. Weights download on first load and run in-process via
+  transformers with `device_map="auto"`. Tick *4-bit* to quantize with
+  bitsandbytes (needs a CUDA GPU). Tick *trust remote code* for repos that ship
+  their own custom model code (only enable it for repos you trust).
+
+### Do I need to log in? (No, for public models)
+
+**No login is required for public models** — that's the vast majority, including
+nearly all the uncensored/abliterated ones. AEYE ships loginless and works out
+of the box. A token is only needed for **gated** repos — mainly Meta *Llama* and
+Google *Gemma* — which require accepting a license on the model's page. Those are
+flagged *gated* in the library, and a failed load explains exactly what's wrong
+instead of a raw error.
+
+To unlock gated repos (optional), create a free token at
+<https://huggingface.co/settings/tokens> (type *Read*) and accept the license on
+the model's page. Then give AEYE the token — **no interactive login**. Easiest
+first:
+
+1. **Token file (simplest).** Make a file called **`hf_token.txt`** next to
+   `start.bat`, paste the token in as the only line, save. `start.bat` loads it
+   automatically on launch and prints *"HuggingFace token loaded — gated models
+   unlocked."* Keep this file private (don't share it).
+2. **Environment variable.** Set it before launching:
+   ```bat
+   set HF_TOKEN=hf_xxxxxxxxxxxxxxxx
+   start.bat
+   ```
+   To make it permanent for your user account: `setx HF_TOKEN hf_xxxx` (then open
+   a new terminal).
+
+AEYE reads `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` / `HUGGINGFACE_TOKEN` if any is
+present. If none is set, everything public still works — no login required.
+
+> Bleeding-edge models sometimes fail to *hf load* with "architecture not
+> recognized" — that's a transformers-version gap, **not** a login issue. If a
+> **GGUF** build of the same model exists, pull it via Ollama instead (search the
+> library); that path handles brand-new architectures.
+
+## Hardware scan & model library
+
+On startup the server scans your hardware (CPU name via the registry, RAM via
+`GlobalMemoryStatusEx`, GPU + VRAM via `nvidia-smi`) — the result shows as a
+badge in the header. The **library** button opens the full model catalog:
+~60 models from 0.5B to 671B, each with q4 download size and RAM/VRAM
+requirements, tagged **FITS GPU** / **CPU ONLY** / **TOO BIG** for *your*
+machine. Filter by fit or search, then **pull** (Ollama, with live progress in
+the row) or **hf load** (transformers) straight from the table. Incompatible
+models stay listed — you can see exactly what they'd need.
+
+The model dropdown also gets a *"suggested for your hardware"* group: popular
+models that fit but aren't installed — selecting one starts the pull.
+
+### Search the whole hub
+
+The curated catalog is only a starting point. The **search bar** at the top of
+the library queries **all of HuggingFace and the Ollama library live** — any
+repo, any size, catalog or not. Type a name (min 3 chars; it debounces as you
+type) and results come back grouped by source:
+
+- **Ollama library** results pull by name (`ollama pull <name>`).
+- **HuggingFace** results are classified automatically:
+  - **GGUF** repos → a quant dropdown + **pull**, which pulls the GGUF straight
+    into Ollama via `hf.co/<repo>:<tag>`. Only tags Ollama actually accepts are
+    offered — `latest` (the maintainer's default) plus any canonical quant the
+    repo ships (`Q4_K_M`, `Q6_K`, `Q8_0`, …). Non-standard names a repo might
+    use (e.g. a bare `Q4_K`) are hidden because Ollama rejects them; `latest`
+    covers them.
+  - **transformers** repos → **hf load** (respects the drawer's 4-bit checkbox).
+  - **image** repos (diffusers / text-to-image) → **load ▸ imagine**.
+
+Each result shows downloads, likes, a *gated* flag, and a ↗ link to its page.
+So a specific model like `huihui-ai/Huihui-Qwythos-9B-Claude-Mythos-5-1M-abliterated-GGUF`
+is one search-and-pull away — and, because it's abliterated, it's also pinned
+into the curated **uncensored** list as *Qwythos Mythos 9B Abliterated*.
+
+### Auto-updating trending models
+
+On every launch AEYE does a **silent background scan** — if you're online it
+queries HuggingFace's trending list (general, *plus* a dedicated pass for
+freshly-trending **uncensored / abliterated** models) and the Ollama library,
+and folds the latest & greatest into the catalog automatically. The eye turns
+violet while the scan runs; a status line at the top of
+the library reads e.g. *"103 trending models · updated 12s ago"*, with a
+**refresh trending** button to rescan on demand.
+
+- Trending rows are marked with a 🔥 and can be isolated with the **🔥 trending**
+  filter. Uncensored models are still ranked first; within each bucket the
+  newest/most-trending come first.
+- Results are **cached to `catalog_cache.json`**, so the library is populated
+  instantly on the next start and still works fully **offline** (the status line
+  shows *"offline — showing cached trending models"*). The scan silently no-ops
+  if there's no connection.
+- Sizes come from the model name when it carries a parameter count; otherwise
+  the scan asks the repo itself — exact parameter totals from safetensors
+  metadata, real quant sizes from GGUF file listings, and weight-file totals
+  for image pipelines. Only rows with nothing to go on (e.g. Ollama family
+  pages spanning many sizes) stay **SIZE ?** — click the model name to check
+  its page. GGUF repos become one-click Ollama pulls, transformers repos
+  become **hf load**, and trending image models load into the diffusers
+  pipeline.
+
+## Search the whole hub (any model, catalog or not)
+
+The library has a **search hub** bar at the top that queries **all of
+HuggingFace and the entire Ollama library** live — not just the curated catalog,
+and regardless of whether a model fits your machine. Type a name (e.g.
+`Qwythos`, `dolphin`, `sdxl`) and results stream back in two groups:
+
+- **Ollama library** — official models, one-click **pull**.
+- **HuggingFace Hub** — every matching repo, tagged by how it runs:
+  - **GGUF** → pulled straight into Ollama. A quant dropdown offers `latest`
+    (the maintainer's default) plus every quant tag Ollama actually accepts;
+    non-standard quant names that Ollama would reject are hidden so a pull never
+    dead-ends.
+  - **transformers** → **hf load** in-process (honours the 4-bit checkbox).
+  - **image gen** → **load ▸ imagine** into the diffusers pipeline.
+
+Each result shows download/like counts, a *gated* flag for license-gated repos,
+and a ↗ link to its page. Results are ranked by relevance; searching is
+debounced as you type (or hit Enter / **search hub**).
+
+The abliterated **Qwythos Mythos 9B** (Qwen3.5, 1M context, vision + tool-use)
+ships in the curated catalog as a one-click pull, and — like anything else — is
+also findable through the search hub.
+
+## Removing models & voices (de-bloat)
+
+Downloaded models pile up fast. To clear space:
+
+- **Library → 💾 installed** — a live view of *everything* on disk (Ollama models
+  and cached HuggingFace repos), biggest first, with the total GB. Hit the 🗑 on
+  any row to delete it; the freed space is reported. Non-catalog models you
+  pulled (search-hub GGUFs, `hf.co/…` pulls) show up here too.
+- **Inline 🗑** — any catalog row whose model is already downloaded gets a
+  trashcan next to its pull/load button, so you can remove it right where you got
+  it.
+- **Voices** — in the drawer's **Voice** section, a downloaded Piper voice shows a
+  🗑 next to it; deleting removes just that voice's files (voices share one repo,
+  so the others stay).
+
+Deletes ask for confirmation. Deleting a model that's currently loaded unloads it
+first. Ollama deletions go through Ollama; HuggingFace deletions clear the repo
+from the HF cache.
+
+## Vision (image input)
+
+Drag & drop an image anywhere over the chat panel, paste from the clipboard, or
+use the 📎 button. Thumbnails appear above the composer; on send the images ride
+along in the message so a **vision model can read them**. Use an Ollama vision
+model — `llava`, `llama3.2-vision`, or `gemma3` (all in the library). Attaching
+an image to a text-only model returns a clean "model does not support images"
+notice rather than failing silently.
+
+## Image generation (imagine)
+
+The library has an **image gen** category — SD 1.5/2.1, SDXL + Turbo, Playground
+v2.5, SD 3.5, and FLUX.1 — each with VRAM requirements and a fit verdict.
+Hit **load ▸ imagine** on a row to load it into the diffusers pipeline (the
+`img:` badge tracks it). Then the **imagine** button opens a panel: prompt,
+negative prompt, steps, guidance, size and seed. Generate, then **download** the
+PNG or **send to chat** to drop it into the transcript. The NSFW safety checker
+is disabled, and fp16 + model-CPU-offload keep SDXL/FLUX alive on 8 GB cards.
+
+> Image generation and HF model loading pin **transformers < 5** — the 5.x CLIP
+> loader is incompatible with the current diffusers release. `install.bat`
+> handles this automatically.
+
+## Voice (100% local, both ways)
+
+Speech in **and** out is **100% on-device**. Text-to-speech is
+[Piper](https://github.com/rhasspy/piper); speech-to-text is
+[Whisper](https://github.com/SYSTRAN/faster-whisper). Nothing — no audio, no
+reply text — ever leaves the machine.
+
+> **No cloud voices.** The browser's own mic API (which streamed audio to
+> Microsoft/Google) and the browser/"Natural" TTS voices (which sent reply text
+> to Microsoft) were **removed** for a no-log, no-network path. The mic below is
+> different: it records locally and transcribes with an on-device Whisper model.
+
+- **🔊 speaker** — **on by default**: the eye reads replies aloud as they
+  finish. Click to mute; the toggle, chosen voice and effect persist across
+  sessions (also in the desktop app).
+- **🎤 mic** — click to dictate: it records from your microphone, transcribes
+  locally with Whisper (`faster-whisper`), and drops the text into the chat box
+  for you to edit or send. The model (~140 MB for `base`) downloads once on
+  first use, then works fully offline. Install it by answering **Y** to
+  "Install Whisper speech-to-text" in `install.bat`; without it the mic button
+  stays disabled. Set `AEYE_WHISPER_MODEL` (tiny/base/small/medium/large-v3) to
+  trade speed for accuracy — default `base`, CPU int8 so it never touches the
+  LLM's VRAM.
+
+### Choosing a voice
+
+Open the drawer (`▸ model management`) → **Voice (local Piper TTS)**. Pick from
+**21 voices** (US / UK, plus characterful **Scottish** and **Northern English**
+accents, male & female) and hit **download** (~60–115 MB, fetched once from
+`rhasspy/piper-voices`); a ● means it's ready, ○ means not yet. The `rate` slider
+maps to Piper's length-scale. Hit **test** to preview, **🗑** to delete a voice.
+
+**Effects.** The **effect** dropdown applies a preset to *any* voice:
+- **Pitch presets** (cheap, dependency-free): `goblin`, `demon`, `giant`, `troll`
+  (deep) and `chipmunk`, `sprite`, `gremlin` (high).
+- **Horror chains** (real DSP via Spotify's [pedalboard](https://github.com/spotify/pedalboard)):
+  `dalek` (ring-mod corrupted machine), `corrupted` (ring-mod + bitcrush +
+  distortion), `radiodemon` (digital broadcast: bandlimited + bit-crushed + ring-
+  mod demon with **random data-beeps and dropouts**), `possessed` (detuned many-
+  voices), `intercom` (bandlimited facility PA), `wraith` (deep + heavy reverb),
+  `hive` (voice swarm). Each stacks pitch-shift, ring modulation, detuned
+  layering, bitcrush, distortion and dark reverb. If `pedalboard` isn't installed
+  they simply don't appear.
+- **`random`** shuffles the horror effects mid-speech (every 3–8 words), keeping
+  your selected voice fixed — a corrupting-in-place, shifting-signal horror.
+
+**Streaming speech.** Replies are spoken **sentence-by-sentence as they generate**,
+played back gaplessly through the Web Audio API — the eye starts talking on the
+first finished sentence and paces itself to the typewriter (tune with `rate`).
+
+Install Piper by answering **Y** to "Install Piper neural TTS" in `install.bat`,
+or later with `.venv\Scripts\pip install -r requirements-tts.txt`. Without it the
+🔊 button is disabled (chat still works; it just won't speak).
+
+## Privacy / no-log
+
+By default AEYE keeps **no chat history and no image-generation history** —
+anywhere. The **memory** feature below is strictly opt-in and strictly local.
+
+- **Conversations & generated images** are never written to disk unless you
+  turn memory on. Chat messages stream through and are held only in the page (a
+  refresh or **clear** wipes them). Generated images come back as in-memory data
+  and are only saved if *you* hit **download**.
+- **No prompt logging.** The server prints only a startup banner and runs the web
+  server at `warning` level — no access logs, no request bodies.
+- **Voice is fully local** (see above): TTS is Piper on-device and STT is Whisper
+  on-device; the browser's cloud mic/voice APIs were removed. Nothing spoken or
+  heard leaves the machine.
+- **HuggingFace telemetry is disabled** (`HF_HUB_DISABLE_TELEMETRY`), so model
+  downloads don't send usage pings.
+- The only files AEYE writes are non-conversational settings: `.aeye_state.json`
+  (the last chat + image models, for auto-reload), `catalog_cache.json` (the
+  public trending-model list), `aeye.log` (desktop-mode server log) and the
+  `.webview` profile (selected model and voice preferences — the desktop
+  equivalent of browser `localStorage`). Delete any of them anytime — they'll
+  be recreated.
+- **Exception — memory, if you turn it on:** saved conversations live as plain
+  JSON under `./memory` on this machine, written only while the toggle is on
+  and readable/deletable by you at any time. Nothing in it is ever uploaded.
+
+## Memory (opt-in chat history & projects)
+
+The **memory** button in the top bar opens the eye's long-term memory. It ships
+**off**; flip *remember my chats* to enable it. While on:
+
+- Every completed exchange is appended to a local file under `memory/chats/`.
+  The current chat keeps growing until you press **clear** (which files it away)
+  or close the app.
+- On exit the model writes a short **briefing** of the conversation. Resuming a
+  long chat later feeds the model that briefing plus the last few messages —
+  it picks up where it left off without re-reading the whole transcript.
+- Chats can be grouped into **projects** (create them in the modal, assign via
+  the per-chat dropdown). The **context** selector picks what the eye recalls
+  while you talk:
+  - **automatic** — briefings of past chats are injected only when your message
+    overlaps their topic;
+  - **project: X** — that project's briefings always ride along, and new chats
+    are filed into the project automatically.
+- **resume** reloads a saved conversation into the chat panel; 🗑 forgets it.
+
+Turning the toggle off stops all writes immediately — existing files stay until
+you delete them (in the modal, or just delete the `memory/` folder).
+
+External components keep their own state: **Ollama** writes its own `server.log`
+(model loads/requests, not full prompts) under `%LOCALAPPDATA%\Ollama\`, and model
+weights live in the HuggingFace/Ollama caches (manage them from **💾 installed**).
+
+## Modelfile editor
+
+The **modelfile** button (next to the temp slider) opens an editor: pick any
+installed Ollama model, *load modelfile* to see its recipe (FROM, TEMPLATE,
+PARAMETER, SYSTEM...), edit it, give it a new name, and *create from
+modelfile* — which runs `ollama create` and streams the build output. The
+**create** button runs the build directly once the editor is primed.
+
+Temperature, max tokens and a system prompt are adjustable in the top bar /
+drawer. Enter sends; Shift+Enter inserts a newline.
+
+## Configuration
+
+Environment variables (set before running `start.bat`):
+
+| Variable      | Default                  | Purpose                    |
+|---------------|--------------------------|----------------------------|
+| `AEYE_PORT` | `8130`                   | Web UI port                |
+| `AEYE_HOST` | `127.0.0.1`              | Bind address               |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Where Ollama is listening  |
+
+## Layout
+
+```
+aeye/
+├── install.bat          one-click Windows installer (venv, deps, shortcut)
+├── package.bat          builds disteye-portable.zip to move to another PC
+├── aeye.bat             launches the desktop app (single window, no browser)
+├── start.bat            launches server + browser (alternative to aeye.bat)
+├── server.py            FastAPI server (Ollama proxy + HF backend)
+├── desktop.py           desktop entrypoint (server + UI in a native window)
+├── requirements.txt     core deps (incl. pywebview desktop shell)
+├── requirements-hf.txt  optional HuggingFace deps (transformers<5)
+├── requirements-img.txt optional image-gen deps (diffusers)
+├── requirements-tts.txt optional Piper neural-TTS deps
+├── requirements-stt.txt optional Whisper speech-to-text deps
+├── catalog_cache.json   auto-generated cache of trending models (safe to delete)
+└── static/
+    ├── index.html       UI shell
+    ├── style.css        phosphor CRT theme (eye mood via CSS vars)
+    ├── eye.js           procedural ASCII eye renderer
+    ├── chat.js          streaming chat, image attach, model management
+    ├── library.js       model library + modelfile editor
+    ├── imagine.js       image-generation panel
+    ├── voice.js         text-to-speech (local Piper)
+    ├── stt.js           speech-to-text mic (local Whisper)
+    ├── memory.js        opt-in chat memory + projects (see Memory section)
+    └── aeye.ico         pixel-art eye icon (window/taskbar/shortcut)
+```
