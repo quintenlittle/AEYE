@@ -88,6 +88,9 @@ eyelids), which is what lets it move smoothly. It:
 
 ## Models
 
+<img width="1920" height="1040" alt="AEYE_6OsCrCEzoc" src="https://github.com/user-attachments/assets/1f48d3bb-a06f-4731-b5af-ef755f9a6606" />
+
+
 The dropdown always defaults to the **last model you used** (any backend); on a
 fresh install it starts on the house default. In the library, every **model name
 is a link** — click it to open the model's HuggingFace or Ollama page in your
@@ -195,6 +198,8 @@ the library reads e.g. *"103 trending models · updated 12s ago"*, with a
 
 ## Search the whole hub (any model, catalog or not)
 
+<img width="1920" height="1040" alt="AEYE_rZmMtSG3YA" src="https://github.com/user-attachments/assets/82a78452-77bb-4bed-9b8c-9d1c3e9adfb0" />
+
 The library has a **search hub** bar at the top that queries **all of
 HuggingFace and the entire Ollama library** live — not just the curated catalog,
 and regardless of whether a model fits your machine. Type a name (e.g.
@@ -247,6 +252,9 @@ notice rather than failing silently.
 
 ## Image generation (imagine)
 
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/f5be23bb-0ea0-448a-a75f-e99d306662f9" />
+
+
 The library has an **image gen** category — SD 1.5/2.1, SDXL + Turbo, Playground
 v2.5, SD 3.5, and FLUX.1 — each with VRAM requirements and a fit verdict.
 Hit **load ▸ imagine** on a row to load it into the diffusers pipeline (the
@@ -271,6 +279,9 @@ model-CPU-offload tricks keep it alive on smaller cards. Download the clip or
 **send to chat** to drop it into the transcript.
 
 ## Voice (100% local, both ways)
+
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/5ffe9c59-1d1f-4880-bd21-f13af660b3c9" />
+
 
 Speech in **and** out is **100% on-device**. Text-to-speech is
 [Piper](https://github.com/rhasspy/piper); speech-to-text is
@@ -350,6 +361,9 @@ anywhere. The **memory** feature below is strictly opt-in and strictly local.
 
 ## Memory (opt-in chat history & projects)
 
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/3b863ed8-1212-45b3-a6b4-a7c7ffa8555d" />
+
+
 The **memory** button in the top bar opens the eye's long-term memory. It ships
 **off**; flip *remember my chats* to enable it. While on:
 
@@ -388,6 +402,9 @@ drawer. Enter sends; Shift+Enter inserts a newline.
 
 ## Plugins
 
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/72bf976a-f6fa-4352-8087-d51242e8dc0f" />
+
+
 AEYE ships a small **plugin system** for wiring in your own local tools. Drop a
 folder into `%APPDATA%\AEYE\plugins\<id>\` with an `aeye-plugin.json` manifest
 (name, trigger, command); a chat message that starts with the trigger runs the
@@ -398,6 +415,9 @@ environment. A bundled **`echo`** sample shows the format and the **`rss`** read
 and edit its manifest in the built-in editor.
 
 ## Running on modest hardware
+
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/70d3a7c5-ba35-4b68-9942-cc9860bbb5ec" />
+
 
 AEYE is built to stay usable on modest or GPU-light machines:
 
