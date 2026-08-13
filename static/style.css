@@ -1276,3 +1276,33 @@ button.ghost { color: var(--sclera); }
 }
 #sidebar-tab:hover { border-color: var(--accent); }
 body.sb-open #sidebar-tab { display: none; }
+
+/* ============================================================
+   FLAT CHAT  (revertable — delete this whole block, down to
+   "end FLAT CHAT", to restore the boxed look and re-bump the
+   style.css?v= number in index.html).
+   Strips the bordered/filled "card" from BOTH your prompts and
+   the eye's replies (including RSS / plugin output, which stream
+   into an assistant bubble), plus the reasoning + web-activity
+   panels, so the whole chat reads as plain text. Kept as
+   transparent borders so nothing shifts — only the box
+   disappears. Prompts stay right-aligned, replies left-aligned,
+   so who-said-what is still clear.
+   ============================================================ */
+.msg.user,
+.msg.assistant,
+.msg.assistant.streaming,
+.msg.assistant.error {
+  background: transparent;
+  border-color: transparent;
+}
+.msg .think,
+.msg .think.web {
+  background: transparent;
+  border-color: transparent;
+}
+.msg .think[open] > summary,
+.msg .think.web[open] > summary {
+  border-bottom-color: transparent;
+}
+/* ============================== end FLAT CHAT ============================== */
