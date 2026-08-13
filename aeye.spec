@@ -39,6 +39,9 @@ hiddenimports += [
     "websockets", "websockets.legacy", "httptools",
     "h11", "anyio", "click",
     "webview.platforms.winforms", "clr",
+    # local P2P package (imported by server.py) -- belt-and-braces so the
+    # analyzer never drops the submodules
+    "p2p", "p2p.session", "p2p.connection", "p2p.upnp",
 ]
 
 # pull in package data + native libs for the runtime deps that ship them

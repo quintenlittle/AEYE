@@ -414,6 +414,34 @@ environment. A bundled **`echo`** sample shows the format and the **`rss`** read
 (below) is a working example; you can also install one straight from a GitHub URL
 and edit its manifest in the built-in editor.
 
+## Peer-to-peer (P2P)
+
+Open **p2p** in the top bar to talk **directly to another AEYE instance** — no
+server, no account, no cloud in the middle. One side **hosts** a session and
+shares a short code; the other **connects** to it over a plain TCP socket
+(port **8131**, kept separate from the app's own **8130**).
+
+- **Host** — *Start Session* mints a one-time code (`AEYE-XXXX-XXXX`, valid 10
+  minutes) and starts a listener. The window shows the code, your local IP and
+  the port to hand to your peer.
+- **Connect** — enter the host's IP, port and code. The code is validated on the
+  host: a good one is accepted and the link goes live; a bad or expired one is
+  rejected cleanly.
+- **Chat** — once connected, messages go back and forth in real time
+  (newline-delimited JSON over the socket); your own messages echo immediately.
+- **Network Tools** — a checkbox for **UPnP** auto port-forwarding (stubbed for
+  now) and a link to a **port-forwarding guide**, for reaching a peer across the
+  internet. On the same LAN, the local IP + port is enough.
+- **Debug Mode** — off by default; on, it surfaces verbose connection/error
+  logs. Off keeps message **contents out of the logs** entirely.
+
+If a connection is blocked it's almost always a **VPN or firewall** — the window
+says so and suggests disabling the VPN or allowing AEYE through the firewall.
+
+Still early: this layer is **not encrypted yet** (TLS is planned, without
+changing the protocol), there's **no file transfer**, and **nothing is
+persisted** — close the window and the conversation is gone.
+
 ## Running on modest hardware
 
 <img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/70d3a7c5-ba35-4b68-9942-cc9860bbb5ec" />

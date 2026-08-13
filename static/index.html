@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=9">
+<link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 <body data-state="idle">
 <script>
@@ -72,6 +72,7 @@ if (!localStorage.getItem('aeye-default-v3')) {
         <button id="imagine-btn" title="Generate an image with a loaded diffusion model">imagine</button>
         <button id="dream-btn" title="Generate a video clip with a loaded text-to-video model">dream</button>
         <button id="memory-btn" title="Chat memory — saved conversations &amp; projects">memory</button>
+        <button id="p2p-btn" title="Peer-to-peer — host a session or join one directly">p2p</button>
       </div>
     </div>
   </header>
@@ -680,6 +681,78 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 
   <div id="scanlines" aria-hidden="true"></div>
 
+  <!-- ============ ENCRYPTED P2P (Phase 1: session handshake) ============ -->
+  <div class="overlay hidden" id="p2p-modal">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <span class="modal-title">&#9673; P2P</span>
+        <span class="modal-sub">direct peer-to-peer &mdash; session handshake</span>
+        <button class="close" data-close="p2p-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <fieldset class="p2p-sec">
+          <legend>Host</legend>
+          <div class="fieldset-hint">Start a session, then share the code plus your IP and port with the peer. The code expires after 10 minutes.</div>
+          <div class="p2p-row">
+            <button id="p2p-host-start" type="button">Start Session</button>
+            <button id="p2p-host-stop" type="button" class="ghost hidden">Stop</button>
+            <span class="mini-status" id="p2p-host-status" style="min-height:0"></span>
+          </div>
+          <div id="p2p-host-info" class="p2p-info hidden">
+            <div class="p2p-field"><span class="p2p-lab">Session code</span><code id="p2p-code" class="p2p-code">&mdash;</code></div>
+            <div class="p2p-field"><span class="p2p-lab">Local IP</span><code id="p2p-ip">&mdash;</code></div>
+            <div class="p2p-field"><span class="p2p-lab">Port</span><code id="p2p-port">&mdash;</code></div>
+            <div class="p2p-field"><span class="p2p-lab">Expires in</span><span id="p2p-expiry">&mdash;</span></div>
+            <div class="p2p-field"><span class="p2p-lab">Connections</span><span id="p2p-conns">0</span></div>
+          </div>
+        </fieldset>
+
+        <fieldset class="p2p-sec">
+          <legend>Connect</legend>
+          <div class="fieldset-hint">Enter the host's IP, port and session code to join.</div>
+          <div class="p2p-connect-grid">
+            <label>IP <input id="p2p-c-ip" spellcheck="false" autocomplete="off" placeholder="e.g. 203.0.113.7 or 192.168.1.20"></label>
+            <label>Port <input id="p2p-c-port" type="number" min="1" max="65535" value="8131"></label>
+            <label>Session code <input id="p2p-c-code" spellcheck="false" autocomplete="off" placeholder="AEYE-XXXX-XXXX" maxlength="14"></label>
+          </div>
+          <div class="p2p-row">
+            <button id="p2p-connect" type="button">Connect</button>
+            <span class="mini-status" id="p2p-connect-status" style="min-height:0"></span>
+          </div>
+        </fieldset>
+
+        <fieldset class="p2p-sec">
+          <legend>Network Tools</legend>
+          <label class="chk"><input id="p2p-upnp" type="checkbox"> Enable Auto Port Forwarding (UPnP)</label>
+          <div class="p2p-row">
+            <button id="p2p-guide" type="button" class="ghost">Open Port Forwarding Guide</button>
+            <span class="mini-status" id="p2p-upnp-status" style="min-height:0"></span>
+          </div>
+          <div class="fieldset-hint">To be reachable over the internet, forward this port on your router to this PC. Auto-forwarding uses UPnP if your router allows it (stubbed in this build &mdash; returns unavailable for now).</div>
+        </fieldset>
+
+        <fieldset class="p2p-sec">
+          <legend>Chat</legend>
+          <div class="p2p-row">
+            <span id="p2p-chat-status" class="p2p-status off">Disconnected</span>
+            <button id="p2p-chat-disconnect" type="button" class="ghost hidden">Disconnect</button>
+            <label class="chk" style="margin-left:auto"><input id="p2p-debug" type="checkbox"> Debug Mode</label>
+          </div>
+          <div id="p2p-chat-log" class="p2p-chat-log" aria-live="polite"></div>
+          <div class="p2p-chat-input">
+            <input id="p2p-chat-msg" spellcheck="true" autocomplete="off" placeholder="type a message…" disabled>
+            <button id="p2p-chat-send" type="button" disabled>Send</button>
+          </div>
+        </fieldset>
+
+        <details class="p2p-log-wrap">
+          <summary>Listener log</summary>
+          <pre id="p2p-log" class="p2p-log"></pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
 <script src="/static/eye.js?v=2"></script>
 <script src="/static/game.js?v=2"></script>
 <script src="/static/chat.js?v=3"></script>
@@ -698,6 +771,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
 <script src="/static/plugins.js?v=4"></script>
+<script src="/static/p2p.js?v=3"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>
 /* replace the native white number-spinner on EVERY number input (header knobs,

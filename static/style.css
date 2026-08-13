@@ -1315,3 +1315,52 @@ body.sb-open #sidebar-tab { display: none; }
   border-bottom-color: transparent;
 }
 /* ============================== end FLAT CHAT ============================== */
+
+/* ---------------- encrypted P2P window (p2p.js) ---------------- */
+/* the P2P window has a lot of sections -- let it use nearly the full viewport
+   height so everything fits without an inner scrollbar (which clipped controls) */
+#p2p-modal .modal { max-height: 96vh; }
+.p2p-sec { border: 1px solid var(--line); border-radius: 4px; margin: 0 0 10px; padding: 6px 12px 10px; }
+.p2p-sec > legend { padding: 0 6px; color: var(--sclera); font-size: 12px; letter-spacing: 1px; }
+.p2p-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.p2p-info { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.p2p-field { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+.p2p-lab { flex: 0 0 108px; color: var(--sclera); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+.p2p-code { font-size: 16px; letter-spacing: 2px; color: var(--accent); user-select: all; }
+.p2p-connect-grid { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.p2p-connect-grid label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sclera); }
+.p2p-connect-grid input {
+  flex: 1; min-width: 0; background: var(--well); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 4px; font: 12px var(--mono); padding: 4px 7px;
+}
+.p2p-log-wrap { margin-top: 2px; }
+.p2p-log-wrap > summary { cursor: pointer; font-size: 11px; color: var(--sclera); letter-spacing: 1px; }
+.p2p-log {
+  max-height: 160px; overflow: auto; margin: 6px 0 0; padding: 6px 8px;
+  background: var(--well); border: 1px solid var(--line); border-radius: 4px;
+  font-size: 11px; line-height: 1.4; color: var(--sclera); white-space: pre-wrap;
+}
+
+/* ---- P2P chat (Phase 2) ---- */
+.p2p-status {
+  font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+  padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; color: var(--sclera);
+}
+.p2p-status.ok { color: var(--accent); border-color: var(--accent); }
+.p2p-status.off { color: var(--sclera); }
+.p2p-status.err { color: var(--vein); border-color: var(--vein); }
+.p2p-chat-log {
+  height: 150px; overflow-y: auto; margin: 8px 0; padding: 6px 8px;
+  background: var(--well); border: 1px solid var(--line); border-radius: 4px;
+  font-size: 12px; line-height: 1.5; display: flex; flex-direction: column; gap: 3px;
+}
+.p2p-msg { white-space: pre-wrap; word-break: break-word; }
+.p2p-msg.me { color: var(--fg); }
+.p2p-msg.peer { color: var(--accent); }
+.p2p-msg.dbg { color: var(--sclera); font-size: 11px; opacity: .8; }
+.p2p-chat-input { display: flex; gap: 8px; }
+.p2p-chat-input input {
+  flex: 1; min-width: 0; background: var(--well); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 4px; font: 12px var(--mono); padding: 5px 8px;
+}
+.p2p-chat-input input:disabled { opacity: .5; }

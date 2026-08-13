@@ -30,6 +30,7 @@ from typing import Optional
 # sys.path -- MUST run before any heavy import (numpy/torch/onnxruntime) so the
 # sidecar's copies win. Also seeds the data dir, HF token and sample plugins.
 import paths  # noqa: E402
+import p2p  # noqa: E402  -- P2P subsystem (session codes + TCP handshake + UPnP stub)
 
 # no-log posture: silence HuggingFace's download telemetry pings before any
 # hub/transformers/diffusers import reads this. Weights still download; only
@@ -5569,6 +5570,273 @@ async def ticker(symbols: str = ""):
     quotes = [by[s] for s in syms if s in by]      # keep the requested order
     return {"ok": bool(quotes), "quotes": quotes,
             "error": None if quotes else "no quotes"}
+
+
+# --------------------------------------------------------------------------
+# P2P (Phase 1): session codes + a TCP handshake listener + a UPnP stub.
+# Fully modular under p2p/. The listener binds its OWN port (default 8131) and
+# never touches the main HTTP server on 8130. Nothing runs until the user
+# starts a session from the "encrypted p2p" window; stopping (or app exit)
+# tears the listener + session down cleanly.
+# --------------------------------------------------------------------------
+_P2P_SESSIONS = p2p.SessionManager()
+_p2p_listener = None                       # created on the first host-start
+_p2p_lock = threading.Lock()
+
+
+def _lan_ip() -> str:
+    """Best-effort LAN IP of this machine, for a peer to dial. Falls back to
+    127.0.0.1. No packet is sent -- connect() on a UDP socket just picks the
+    outbound interface."""
+    import socket
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        if s:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+
+class P2PHostReq(BaseModel):
+    port: Optional[int] = None
+
+
+class P2PConnectReq(BaseModel):
+    ip: str
+    port: int
+    code: str
+
+
+class P2PUpnpReq(BaseModel):
+    port: Optional[int] = None
+    enable: bool = True
+
+
+@app.post("/api/p2p/host/start")
+def p2p_host_start(req: P2PHostReq):
+    """Host a session: mint a code and start the TCP listener. Returns the code
+    plus the dial-in info (LAN IP + port) for a peer."""
+    global _p2p_listener
+    port = int(req.port) if req.port else p2p.DEFAULT_PORT
+    with _p2p_lock:
+        info = _P2P_SESSIONS.create_session()      # a fresh code each (re)start
+        if _p2p_listener and _p2p_listener.is_running():
+            _p2p_listener.stop()
+        _p2p_listener = p2p.P2PListener(_P2P_SESSIONS, port=port)
+        try:
+            _p2p_listener.start()
+        except OSError as e:
+            _P2P_SESSIONS.invalidate_session()
+            _p2p_listener = None
+            # WinError 10013 -> firewall/VPN; otherwise report the bind error
+            if isinstance(e, PermissionError) or "10013" in str(e):
+                return {"ok": False, "error": _p2p_friendly_error(e)}
+            return {"ok": False, "error": f"could not bind port {port}: {e}"}
+    return {"ok": True, "code": info["code"], "ip": _lan_ip(), "port": port,
+            "expires_in": info["expires_in"]}
+
+
+@app.post("/api/p2p/host/stop")
+def p2p_host_stop():
+    """Stop hosting: close the listener and invalidate the session code."""
+    with _p2p_lock:
+        if _p2p_listener:
+            _p2p_listener.stop()
+        _P2P_SESSIONS.invalidate_session()
+    return {"ok": True}
+
+
+@app.get("/api/p2p/status")
+def p2p_status():
+    """Current host state -- used by the window to show the code, dial-in info,
+    live connection count and the verbose listener log."""
+    info = _P2P_SESSIONS.info()
+    listener = _p2p_listener
+    running = bool(listener and listener.is_running())
+    return {
+        "hosting": running,
+        "code": info["code"] if running else None,
+        "expires_in": info["expires_in"],
+        "active": info["active"],
+        "ip": _lan_ip() if running else None,
+        "port": listener.port if running else p2p.DEFAULT_PORT,
+        "connections": listener.conn_count() if running else 0,
+        "logs": list(listener.logs) if listener else [],
+    }
+
+
+@app.post("/api/p2p/connect")
+def p2p_connect(req: P2PConnectReq):
+    """Client side: dial a host, send the auth code, return the handshake result.
+    Nothing is kept open (Phase 1 has no chat yet)."""
+    ip = (req.ip or "").strip()
+    if not ip:
+        return {"ok": False, "error": "missing IP"}
+    res = p2p.connect_and_auth(ip, int(req.port), (req.code or "").strip())
+    resp = res.get("response") or {}
+    return {"ok": res["ok"], "result": resp.get("type"), "error": res.get("error")}
+
+
+@app.post("/api/p2p/upnp")
+def p2p_upnp(req: P2PUpnpReq):
+    """Attempt (or remove) a UPnP port forward. Phase 1: the stub always returns
+    False, so the UI wiring works today and gains real behaviour later."""
+    port = int(req.port) if req.port else (
+        _p2p_listener.port if _p2p_listener else p2p.DEFAULT_PORT)
+    ok = p2p.attempt_port_forward(port) if req.enable else p2p.remove_port_forward(port)
+    return {"ok": ok, "port": port,
+            "note": None if ok else
+            "UPnP not available yet (stub) -- use the manual port-forwarding guide"}
+
+
+def _p2p_shutdown():
+    try:
+        if _p2p_listener:
+            _p2p_listener.stop()
+    except Exception:
+        pass
+
+
+import atexit as _atexit  # noqa: E402
+_atexit.register(_p2p_shutdown)
+
+
+# --------------------------------------------------------------------------
+# P2P Phase 2: real-time chat over the authenticated connection. All ADDITIVE
+# -- the Phase 1 auth/connection/route code above is untouched. A host chats
+# with whichever peer authenticated to its listener; a client opens a
+# PERSISTENT connection (new route -- the one-shot /api/p2p/connect stays as
+# is) and both sides read/send NDJSON via p2p.HUB.
+# --------------------------------------------------------------------------
+_p2p_client_conn = None
+_p2p_client_thread = None
+_p2p_client_lock = threading.Lock()
+
+
+def _p2p_client_log(line):
+    try:
+        print("P2P " + line, flush=True)
+    except Exception:
+        pass
+
+
+_p2p_debug = False        # verbose logging incl. message contents (synced from UI)
+
+
+def _p2p_friendly_error(e) -> str:
+    """Map low-level socket errors to a clear, user-facing message. WinError
+    10013 (an access-forbidden socket error) is almost always a firewall or VPN
+    blocking the direct connection."""
+    s = str(e)
+    if isinstance(e, PermissionError) or "10013" in s:
+        return ("Connection blocked (likely firewall or VPN). Try disabling VPN "
+                "or allowing AEYE through the firewall.")
+    return "{}: {}".format(type(e).__name__, e)
+
+
+class P2PSendReq(BaseModel):
+    msg: str = ""
+
+
+class P2PDebugReq(BaseModel):
+    enabled: bool = False
+
+
+@app.post("/api/p2p/debug")
+def p2p_debug(req: P2PDebugReq):
+    """Toggle verbose P2P logging. OFF (the default) keeps message CONTENTS out
+    of the logs -- they still appear in the chat window, just never in the log
+    output/file. ON logs everything (connection events, errors, contents)."""
+    global _p2p_debug
+    _p2p_debug = bool(req.enabled)
+    p2p.set_debug(_p2p_debug)
+    return {"ok": True, "debug": _p2p_debug}
+
+
+@app.get("/api/p2p/poll")
+def p2p_poll(since: int = 0):
+    """Drain chat + lifecycle events since `since` (poll-based bridge to the
+    frontend). Returns the events and the new cursor."""
+    events, cursor = p2p.HUB.since(int(since))
+    return {"events": events, "cursor": cursor, "connected": p2p.HUB.connected()}
+
+
+@app.post("/api/p2p/send")
+def p2p_send(req: P2PSendReq):
+    """Send a chat line on the active connection (host's peer, or the client's
+    socket -- whichever this instance holds)."""
+    conn = p2p.HUB.active()
+    if conn is None:
+        return {"ok": False, "error": "not connected"}
+    ok = p2p.send_chat(conn, req.msg or "")
+    if ok:
+        _p2p_client_log("[CHAT SENT] {}".format(req.msg) if _p2p_debug else "[CHAT SENT]")
+    return {"ok": ok, "error": None if ok else "send failed"}
+
+
+@app.post("/api/p2p/chat/connect")
+def p2p_chat_connect(req: P2PConnectReq):
+    """Client side: open a PERSISTENT authenticated connection and start the
+    chat read loop. Extends the Phase 1 one-shot /api/p2p/connect (which is left
+    untouched) -- reuses the same auth handshake, then keeps the socket open."""
+    global _p2p_client_conn, _p2p_client_thread
+    ip = (req.ip or "").strip()
+    if not ip:
+        return {"ok": False, "error": "missing IP"}
+    with _p2p_client_lock:
+        if _p2p_client_conn is not None:           # drop any previous session
+            try:
+                _p2p_client_conn.close()
+            except Exception:
+                pass
+            _p2p_client_conn = None
+        try:
+            s = p2p.open_chat_client(ip, int(req.port), (req.code or "").strip(),
+                                     log=_p2p_client_log)
+        except Exception as e:
+            # WinError 10013 etc. -> a clear firewall/VPN message, no crash
+            return {"ok": False, "result": None, "error": _p2p_friendly_error(e)}
+        if s is None:
+            return {"ok": False, "result": "auth_fail", "error": "bad or expired code"}
+        _p2p_client_conn = s
+        peer = f"{ip}:{req.port}"
+        _p2p_client_thread = threading.Thread(
+            target=p2p.run_chat_loop, args=(s, peer, _p2p_client_log),
+            name="p2p-client", daemon=True)
+        _p2p_client_thread.start()
+    return {"ok": True, "result": "auth_ok", "error": None}
+
+
+@app.post("/api/p2p/chat/disconnect")
+def p2p_chat_disconnect():
+    """Close this instance's client connection (host side uses /host/stop)."""
+    global _p2p_client_conn
+    with _p2p_client_lock:
+        if _p2p_client_conn is not None:
+            try:
+                _p2p_client_conn.close()
+            except Exception:
+                pass
+            _p2p_client_conn = None
+    return {"ok": True}
+
+
+def _p2p_chat_shutdown():
+    try:
+        if _p2p_client_conn:
+            _p2p_client_conn.close()
+    except Exception:
+        pass
+
+
+_atexit.register(_p2p_chat_shutdown)
 
 
 BANNER = r"""

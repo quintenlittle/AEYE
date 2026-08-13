@@ -105,6 +105,9 @@ Source: "..\plugins\rss\*"; DestDir: "{userappdata}\AEYE\plugins\rss"; Flags: re
 Source: "..\browser-css\*"; DestDir: "{userappdata}\AEYE\browser-css"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist; Components: core
 ; --- WebView2 offline bootstrapper: copied to {tmp} only if the runtime is absent ---
 Source: "..\assets\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist; Check: NeedsWebView2
+; --- bundled Node.js MSI: copied to {tmp} only if node isn't already on PATH.
+;     skipifsourcedoesntexist keeps the build working on machines without the MSI. ---
+Source: "..\assets\node-v24.19.0-x64.msi"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist; Check: NeedsNode
 ; --- default Piper voice: pre-seed the per-user HF cache so TTS works offline OOTB ---
 #if DirExists(AddBackslash(SourcePath) + "..\assets\hf-cache")
 Source: "..\assets\hf-cache\*"; DestDir: "{userappdata}\AEYE\hf-cache"; Flags: recursesubdirs createallsubdirs ignoreversion; Components: voice
@@ -132,6 +135,9 @@ Name: "{autodesktop}\{#AppName}";               Filename: "{app}\{#AppExe}"; Ico
 ;
 ; WebView2 first (the app can't render without it) -- only when missing
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft WebView2 runtime..."; Flags: waituntilterminated; Check: NeedsWebView2
+; Node.js (bundled MSI) -- silent install ONLY when node is missing. No Chocolatey,
+; no npm packages; just the runtime, so RSS / Node-based plugins work OOTB.
+Filename: "msiexec.exe"; Parameters: "/i ""{tmp}\node-v24.19.0-x64.msi"" /qn /norestart"; StatusMsg: "Installing Node.js (for RSS / plugins)..."; Flags: waituntilterminated; Check: ShouldInstallNode
 ; Ollama + default model (own console, real user, ~4 GB pull)
 Filename: "{app}\tools\setup_ollama.bat"; Parameters: "auto"; StatusMsg: "Setting up Ollama + pulling the default chat model (~4 GB)..."; Flags: shellexec waituntilterminated runasoriginaluser; Components: ollama
 ; AI extras (own console so a Python-version prompt is answerable, real user so
@@ -254,6 +260,32 @@ end;
 function NeedsWebView2: Boolean;
 begin
   Result := not WebView2Installed;
+end;
+
+// ---- Node.js detection (RSS / Node-based plugins need it) -------------------
+// We do NOT auto-install anything here (no Chocolatey, no extra packages) --
+// just detect it and, if missing, tell the user clearly at the end.
+function NodeInstalled: Boolean;
+var
+  rc: Integer;
+begin
+  Result := False;
+  // `where node` exits 0 when node.exe is on PATH
+  if Exec(ExpandConstant('{cmd}'), '/C where node >nul 2>nul', '',
+          SW_HIDE, ewWaitUntilTerminated, rc) then
+    Result := (rc = 0);
+end;
+
+function NeedsNode: Boolean;
+begin
+  Result := not NodeInstalled;
+end;
+
+// only run the bundled MSI when node is missing AND the MSI was actually
+// bundled (it's gitignored, so a clone-build may not have it)
+function ShouldInstallNode: Boolean;
+begin
+  Result := NeedsNode and FileExists(ExpandConstant('{tmp}\node-v24.19.0-x64.msi'));
 end;
 
 // ---- extras flags from the selected sub-components --------------------------
@@ -379,7 +411,7 @@ end;
 
 procedure OnTimer(H, Msg, Event, Time: LongWord);
 var
-  secs, pos: Integer;
+  secs: Integer;
   work, line: string;
 begin
   SeqIdx := (SeqIdx + 1) mod 4;
@@ -394,11 +426,11 @@ begin
     WizardForm.StatusLabel.Visible := False;
     WizardForm.FilenameLabel.Visible := False;
     secs := Integer((GetTickCount - RunStart) div 1000);
-    // creep 95% -> 99% over ~5 min, then HOLD at 99% (never 100% until done)
+    // push the bar straight to the end (100%) once the console tasks begin and
+    // HOLD it there -- no creep/bounce. The live status caption + the ticking
+    // elapsed clock are what show it's still working, until the extras finish.
     WizardForm.ProgressGauge.Max := 1000;
-    pos := 950 + ((secs * 40) div 300);
-    if pos > 990 then pos := 990;
-    WizardForm.ProgressGauge.Position := pos;
+    WizardForm.ProgressGauge.Position := 1000;
     // mirror the active step's StatusMsg + show elapsed time (kills the
     // "stuck" look: the bar creeps and the clock ticks)
     work := Trim(WizardForm.StatusLabel.Caption);
@@ -581,6 +613,16 @@ begin
         + #13#10#13#10 + 'Run "Install or Repair AI Extras" from the Start Menu'
         + ' to finish (watch its console for the reason it stopped).',
         mbError, MB_OK);
+
+    // Node.js fallback: the bundled MSI installs silently above when node is
+    // missing. If it's STILL missing here (MSI skipped or the install failed),
+    // point the user at the manual link -- the rest of AEYE works regardless.
+    if not NodeInstalled then
+      MsgBox('Node.js could not be set up automatically.'
+        + #13#10#13#10 + 'AEYE runs fine without it, but the RSS feed and other'
+        + ' Node-based plugins need Node.js. Install the LTS from'
+        + ' https://nodejs.org and relaunch AEYE to enable them.',
+        mbInformation, MB_OK);
   end;
 end;
 
