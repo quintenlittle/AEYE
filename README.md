@@ -438,9 +438,9 @@ shares a short code; the other **connects** to it over a plain TCP socket
 If a connection is blocked it's almost always a **VPN or firewall** — the window
 says so and suggests disabling the VPN or allowing AEYE through the firewall.
 
-Still early: this layer is **not encrypted yet** (TLS is planned, without
-changing the protocol), there's **no file transfer**, and **nothing is
-persisted** — close the window and the conversation is gone.
+Still early: this layer is now **fully encrypted with TLS**, **encrypted file transfers in progress (also through TLS)**, planned release date is next week **08/17/2026 - 08/21/2026**.
+
+**Future mesh network compatibility on deck** - no planned release date yet...
 
 ## Running on modest hardware
 
