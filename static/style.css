@@ -630,16 +630,15 @@ body.eye-hidden #skull-layer { display: flex; }
 }
 .msg.user      { align-self: flex-end; background: var(--hover); border-color: var(--user-line); }
 .msg.assistant { align-self: flex-start; background: var(--panel); }
-/* hidden-eye mode: the skull backdrop stays visible THROUGH the conversation.
-   The skull is a FIXED-width (~400px) centred block, so a percentage cap
-   can't guarantee clearance -- keep a constant gutter each side of centre
-   instead (half the skull + margin), with a floor so bubbles stay usable on
-   a narrow window. Each side then hugs its edge and the skull shows between. */
+/* hidden-eye mode: messages are transparent (see FLAT CHAT), so the skull
+   backdrop shows THROUGH them -- no need to keep a wide clear gutter any more.
+   Give the eye's replies a comfortable reading width and keep your prompts
+   narrow (they're usually short). Both hug their side with the same #messages
+   inset, so the centred skull stays balanced between them. */
 body.eye-hidden .msg.user,
-body.eye-hidden .msg.assistant {
-  background: transparent;
-  max-width: max(180px, calc(50% - 230px));
-}
+body.eye-hidden .msg.assistant { background: transparent; }
+body.eye-hidden .msg.assistant { max-width: min(760px, 72%); }
+body.eye-hidden .msg.user      { max-width: min(440px, 46%); }
 .msg.assistant.streaming { border-color: var(--accent); }
 .msg.error     { border-color: var(--vein); }
 .msg.note      { align-self: center; color: var(--sclera); font-size: 12px; border-style: dashed; }
