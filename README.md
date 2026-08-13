@@ -8,7 +8,7 @@ talk to it and have it talk back — all **100% on your machine**, with nothing
 phoning home by default. The whole interface is **100% hackable** (plain
 HTML/CSS/JS you can rewrite) and extendable with **custom plugins**. Over it all,
 a procedurally-rendered ASCII **eye follows your mouse cursor** — it watches,
-thinks, speaks, and gets bloodshot when things go wrong.
+thinks, speaks, and gets blindly upset when you click on it.
 
 **Runs on modest hardware, too:** nothing auto-loads at boot, every model is
 tagged for *your* GPU/RAM (with CPU-only picks), and the GPU-hungry extras — the
