@@ -25,6 +25,7 @@
      aeye-boards        [{id,dir,on}]  which boards + scroll direction
      aeye-board-relay   ""             the relay URL template (empty = off)
      aeye-board-max     20             max titles per lane
+     aeye-board-sort    bump           thread sort order (mirrors 4chan)
    ================================================================ */
 (() => {
   'use strict';
@@ -93,6 +94,26 @@
   }
   const setMax = (n) => localStorage.setItem(MAX_KEY, String(n));
 
+  // sort order, mirroring 4chan's catalog sort button. 'bump' keeps the
+  // catalog's own order (bump order); the rest re-sort the fetched threads.
+  const SORT_KEY = 'aeye-board-sort';
+  const SORTS = ['bump', 'lastreply', 'date', 'replies', 'images'];
+  const getSort = () => {
+    const s = localStorage.getItem(SORT_KEY);
+    return SORTS.includes(s) ? s : 'bump';
+  };
+  const setSort = (s) => localStorage.setItem(SORT_KEY, SORTS.includes(s) ? s : 'bump');
+
+  // re-order a fetched list by the chosen sort. Only the catalog path carries
+  // the metadata (time / replies / images); RSS-feed items don't, so those
+  // gracefully fall back to feed order. 'bump' = the catalog's own order (no-op).
+  function sortItems(items, mode) {
+    if (mode === 'bump' || items.length < 2) return items;
+    const key = { lastreply: 'bumped', date: 'time', replies: 'replies', images: 'images' }[mode];
+    if (!key || typeof items[0][key] !== 'number') return items;   // feed items lack it
+    return items.slice().sort((a, b) => (b[key] || 0) - (a[key] || 0));   // desc, stable
+  }
+
   const enabledBoards = () => boards.filter((b) => b.on);
 
   // web access is the gate -- read WEB if it's up, else the raw flag (mirrors
@@ -143,7 +164,14 @@
         if (t.no == null) return;
         const title = clean(t.sub) || clean(t.com);
         if (!title) return;
-        out.push({ title, url: 'https://boards.4chan.org/' + id + '/thread/' + t.no });
+        out.push({
+          title,
+          url: 'https://boards.4chan.org/' + id + '/thread/' + t.no,
+          time: t.time || 0,                        // creation (unix)
+          bumped: t.last_modified || t.time || 0,   // last reply / activity
+          replies: t.replies || 0,
+          images: t.images || 0,
+        });
       });
     });
     return out;
@@ -272,7 +300,7 @@
     }
     // identical titles + direction -> leave the strip scrolling. A rebuild
     // restarts the animation (a visible jump), so skip it unless it changed.
-    const sig = dir + ' ' + items.map((it) => it.title + '' + it.url).join(' ');
+    const sig = dir + ' ' + items.map((it) => it.title + '' + it.url).join(' ');
     if (lane.dataset.sig === sig && track.querySelector('.tick-seq')) return;
     lane.dataset.sig = sig;
     const frac = animPhase(lane);                 // capture progress before rebuild
@@ -334,12 +362,13 @@
     if (inflight) return;
     inflight = true;
     const max = getMax();
+    const sort = getSort();
     try {
       await Promise.all(list.map(async (b) => {
         const lane = laneFor(b.id);
         if (!lane) return;
         try {
-          const items = (await fetchBoard(b.id)).slice(0, max);
+          const items = sortItems(await fetchBoard(b.id), sort).slice(0, max);
           if (!items.length) renderNotice(lane, '⚠ /' + b.id + '/ — no titles', true);
           else renderLane(lane, items, b.dir);
         } catch {
@@ -524,6 +553,11 @@
         const n = Math.min(50, Math.max(5, parseInt(maxInp.value || '20', 10) || 20));
         maxInp.value = n; setMax(n); poll();
       });
+    }
+    const sortSel = $('board-sort');
+    if (sortSel) {
+      sortSel.value = getSort();
+      sortSel.addEventListener('change', () => { setSort(sortSel.value); poll(); });
     }
 
     // board list + add

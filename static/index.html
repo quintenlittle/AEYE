@@ -381,6 +381,15 @@ if (!localStorage.getItem('aeye-default-v3')) {
                 <label class="board-max-lab">titles per lane
                   <input id="board-max" type="number" min="5" max="50" step="1" value="20">
                 </label>
+                <label class="board-max-lab">sort order
+                  <select id="board-sort" title="How each lane orders threads — mirrors 4chan's catalog sort. Uses catalog data (local relay); custom RSS relays fall back to feed order.">
+                    <option value="bump">Bump order</option>
+                    <option value="lastreply">Last reply</option>
+                    <option value="date">Creation date</option>
+                    <option value="replies">Reply count</option>
+                    <option value="images">Image count</option>
+                  </select>
+                </label>
               </div>
               <div class="boards-cfg-col board-relay-col">
                 <div class="ticker-cfg-head">custom relay</div>
@@ -684,7 +693,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/docs.js?v=2"></script>
 <script src="/static/web.js?v=2"></script>
 <script src="/static/ticker.js?v=5"></script>
-<script src="/static/boards.js?v=5"></script>
+<script src="/static/boards.js?v=6"></script>
 <script src="/static/sidebar.js?v=4"></script>
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
