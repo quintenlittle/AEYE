@@ -5583,6 +5583,21 @@ _P2P_SESSIONS = p2p.SessionManager()
 _p2p_listener = None                       # created on the first host-start
 _p2p_lock = threading.Lock()
 
+# TLS: keep the self-signed cert under the data dir, and pre-generate it in a
+# background thread at startup so the first host-start doesn't pay the (one-time)
+# key-generation cost. TLS is transport-only -- the protocol/chat are unchanged.
+p2p.set_cert_dir(os.path.join(paths.DATA_DIR, "p2p"))
+
+
+def _p2p_prewarm_tls():
+    try:
+        p2p.ensure_cert()
+    except Exception:
+        pass
+
+
+threading.Thread(target=_p2p_prewarm_tls, name="p2p-tls-warm", daemon=True).start()
+
 
 def _lan_ip() -> str:
     """Best-effort LAN IP of this machine, for a peer to dial. Falls back to

@@ -20,6 +20,8 @@ import threading
 import time
 from collections import deque
 
+from . import tls          # transport-layer TLS wrapper (no protocol changes)
+
 DEFAULT_PORT = 8131
 _RECV_TIMEOUT = 15.0        # a peer that doesn't send auth in time is dropped
 _MAX_LINE = 4096            # an auth line is tiny -- cap it to avoid abuse
@@ -126,6 +128,22 @@ class P2PListener:
 
     def _handle(self, conn, addr) -> None:
         peer = "{}:{}".format(addr[0], addr[1])
+        # --- TLS: wrap the accepted socket before ANYTHING else. Everything
+        # below uses the wrapped socket; the auth handshake + chat protocol on
+        # top are byte-for-byte identical, just encrypted underneath. ---
+        try:
+            conn.settimeout(_RECV_TIMEOUT)          # also bounds the handshake
+            conn = tls.server_wrap(conn)
+            if _DEBUG:
+                self.log("[TLS HANDSHAKE SUCCESS] {}".format(peer))
+        except Exception as e:
+            if _DEBUG:
+                self.log("[TLS HANDSHAKE FAILED] {} -- {}".format(peer, type(e).__name__))
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return
         try:
             conn.settimeout(_RECV_TIMEOUT)
             line = self._read_line(conn)
@@ -193,6 +211,7 @@ def connect_and_auth(ip: str, port: int, code: str, timeout: float = 8.0) -> dic
     try:
         s = socket.create_connection((ip, int(port)), timeout=timeout)
         s.settimeout(timeout)
+        s = tls.client_wrap(s, ip)          # TLS before auth (transport only)
         s.sendall((json.dumps({"type": "auth", "code": code}) + "\n").encode("utf-8"))
         buf = b""
         while b"\n" not in buf and len(buf) < _MAX_LINE:
@@ -346,6 +365,20 @@ def open_chat_client(ip, port, code, log, timeout: float = 8.0):
     return the authenticated socket so the caller can run :func:`run_chat_loop`
     on it. Returns None if auth is rejected; raises on a connection error."""
     s = socket.create_connection((ip, int(port)), timeout=timeout)
+    s.settimeout(timeout)
+    # --- TLS: wrap before the auth handshake; use the wrapped socket after ---
+    try:
+        s = tls.client_wrap(s, ip)
+        if _DEBUG:
+            log("[TLS HANDSHAKE SUCCESS] {}:{}".format(ip, port))
+    except Exception as e:
+        if _DEBUG:
+            log("[TLS HANDSHAKE FAILED] {}:{} -- {}".format(ip, port, type(e).__name__))
+        try:
+            s.close()
+        except Exception:
+            pass
+        raise
     s.settimeout(timeout)
     s.sendall((json.dumps({"type": "auth", "code": code}) + "\n").encode("utf-8"))
     buf = b""

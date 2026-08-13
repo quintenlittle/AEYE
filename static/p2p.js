@@ -1,46 +1,62 @@
 /* ================================================================
-   AEYE -- encrypted P2P window.
-   Phase 1: session handshake (host a code + listener; a peer dials
-   in with IP + port + code, on the 8131 socket -- separate from the
-   8130 HTTP server).
-   Phase 2: real-time chat over that authenticated connection. No
-   encryption / no file transfer / no persistence yet.
+   AEYE -- P2P (session handshake + real-time chat).
 
-   Receive is a poll-based bridge: the backend read loop pushes chat
-   + lifecycle events into a hub (p2p.HUB); this window polls
-   /api/p2p/poll and renders them. Modal open/close (backdrop, x,
-   Esc) is handled globally in library.js for any .overlay.
+   Setup lives in the "p2p" window (host / connect / network tools +
+   a slide-out NATO phonetic helper). On a successful connection the
+   window closes and the chat is injected into the MAIN UI as a fixed,
+   centred panel (unaffected by the sidebar browser). Debug Mode + the
+   listener log live in Manage > Chat.
+
+   ALL socket traffic goes through the single `P2P` transport object
+   below -- the UI never talks to the socket directly -- so the
+   transport can later be swapped for a TLS-wrapped one without
+   touching this UI code. (No TLS yet.)
    ================================================================ */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const GUIDE_URL = 'https://portforward.com/how-to-port-forward/';
 
-  let statusTimer = null;   // host-info poll (2s)
-  let chatTimer = null;     // chat-event poll (~0.7s)
-  let chatCursor = 0;       // last event seq we've rendered
-
-  async function post(path, body) {
+  // ---- transport abstraction (single send/receive path) --------------------
+  async function jpost(path, body) {
     const r = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
     });
     return r.json();
   }
+  const P2P = {
+    status: () => fetch('/api/p2p/status').then((r) => r.json()),
+    poll: (since) => fetch('/api/p2p/poll?since=' + since).then((r) => r.json()),
+    send: (msg) => jpost('/api/p2p/send', { msg }),
+    hostStart: () => jpost('/api/p2p/host/start', {}),
+    hostStop: () => jpost('/api/p2p/host/stop', {}),
+    connect: (ip, port, code) => jpost('/api/p2p/chat/connect', { ip, port, code }),
+    disconnect: () => jpost('/api/p2p/chat/disconnect', {}),
+    upnp: (enable) => jpost('/api/p2p/upnp', { enable }),
+    setDebug: (enabled) => jpost('/api/p2p/debug', { enabled }),
+  };
 
-  function setStatus(id, msg, err) {
-    const e = $(id);
-    if (e) { e.textContent = msg || ''; e.className = 'mini-status' + (err ? ' err' : ''); }
-  }
+  // ---- state ---------------------------------------------------------------
+  let role = null;            // 'host' | 'client'
+  let hostActive = false;     // a listener is up on this instance
+  let connected = false;      // a peer conversation is live
+  let chatCursor = 0;
+  let pollTimer = null, statusTimer = null;
 
-  // ---- host section --------------------------------------------------------
-  function fmtExpiry(secs) {
-    if (!secs || secs <= 0) return 'expired';
-    const m = Math.floor(secs / 60), s = secs % 60;
-    return m + 'm ' + String(s).padStart(2, '0') + 's';
-  }
+  const modalOpen = () => !$('p2p-modal').classList.contains('hidden');
+  const engaged = () => modalOpen() || hostActive || connected;
 
+  const setStatus = (id, msg, err) => {
+    const e = $(id); if (e) { e.textContent = msg || ''; e.className = 'mini-status' + (err ? ' err' : ''); }
+  };
+  const fmtExpiry = (s) => {
+    if (!s || s <= 0) return 'expired';
+    const m = Math.floor(s / 60), x = s % 60;
+    return m + 'm ' + String(x).padStart(2, '0') + 's';
+  };
+
+  // ---- host section (in the setup window) ----------------------------------
   function showHostInfo(d) {
     $('p2p-code').textContent = d.code || '—';
     $('p2p-ip').textContent = d.ip || '—';
@@ -50,13 +66,7 @@
     $('p2p-host-info').classList.remove('hidden');
     $('p2p-host-stop').classList.remove('hidden');
     $('p2p-host-start').textContent = 'Restart Session';
-    if (Array.isArray(d.logs)) {
-      const log = $('p2p-log');
-      log.textContent = d.logs.join('\n');
-      log.scrollTop = log.scrollHeight;
-    }
   }
-
   function hideHostInfo() {
     $('p2p-host-info').classList.add('hidden');
     $('p2p-host-stop').classList.add('hidden');
@@ -64,214 +74,199 @@
   }
 
   async function refreshStatus() {
-    let d;
-    try { d = await (await fetch('/api/p2p/status')).json(); }
-    catch { return; }
+    let d; try { d = await P2P.status(); } catch { return; }
+    hostActive = !!d.hosting;
     if (d.hosting) {
       showHostInfo(d);
       setStatus('p2p-host-status', d.expires_in > 0 ? 'hosting' : 'code expired', d.expires_in <= 0);
+      if (d.connections > 0 && !connected) { role = 'host'; onConnected(); }   // peer already in
     } else {
       hideHostInfo();
     }
+    const log = $('p2p-log');                 // listener log now lives in Manage > Chat
+    if (log && Array.isArray(d.logs)) { log.textContent = d.logs.join('\n'); log.scrollTop = log.scrollHeight; }
   }
 
   async function startHost() {
     setStatus('p2p-host-status', 'starting…');
-    const d = await post('/api/p2p/host/start', {});
+    const d = await P2P.hostStart();
     if (!d.ok) { setStatus('p2p-host-status', d.error || 'failed to start', true); return; }
-    showHostInfo(d);
-    setStatus('p2p-host-status', 'hosting');
+    role = 'host'; hostActive = true;
+    showHostInfo(d); setStatus('p2p-host-status', 'hosting');
+    startPolling();
   }
-
   async function stopHost() {
-    await post('/api/p2p/host/stop', {});
-    hideHostInfo();
-    $('p2p-log').textContent = '';
-    setStatus('p2p-host-status', 'stopped');
+    await P2P.hostStop();
+    hostActive = false; if (role === 'host') role = null;
+    hideHostInfo(); setStatus('p2p-host-status', 'stopped');
   }
 
-  // ---- chat (Phase 2) ------------------------------------------------------
-  function appendMsg(who, text) {
-    const log = $('p2p-chat-log');
-    const div = document.createElement('div');
-    div.className = 'p2p-msg ' + (who === 'you' ? 'me' : 'peer');
-    div.textContent = (who === 'you' ? 'you  ' : 'peer  ') + text;   // textContent = safe
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-  }
-
-  // verbose log line -- only shown when Debug Mode is on (spec: minimal logs /
-  // no message contents printed when disabled)
-  function debugLine(line) {
-    if (!$('p2p-debug').checked) return;
-    const log = $('p2p-chat-log');
-    const div = document.createElement('div');
-    div.className = 'p2p-msg dbg';
-    div.textContent = line;
-    log.appendChild(div);
-    log.scrollTop = log.scrollHeight;
-  }
-
-  function setChatConnected(on) {
-    const st = $('p2p-chat-status');
-    st.textContent = on ? 'Connected' : 'Disconnected';
-    st.className = 'p2p-status ' + (on ? 'ok' : 'off');
-    $('p2p-chat-msg').disabled = !on;
-    $('p2p-chat-send').disabled = !on;
-    $('p2p-chat-disconnect').classList.toggle('hidden', !on);
-  }
-
-  function setAuthFailed() {
-    const st = $('p2p-chat-status');
-    st.textContent = 'Auth Failed';
-    st.className = 'p2p-status err';
-  }
-
-  function handleEvent(ev) {
-    switch (ev.kind) {
-      case 'chat':
-        appendMsg('peer', ev.msg);
-        break;
-      case 'connected':
-        setChatConnected(true);
-        debugLine('[CONNECTION ESTABLISHED] ' + (ev.peer || ''));
-        break;
-      case 'disconnected':
-        setChatConnected(false);
-        debugLine('[DISCONNECTED] ' + (ev.peer || ''));
-        break;
-      case 'invalid':
-        debugLine('[INVALID MESSAGE] ' + (ev.reason || ''));
-        break;
-      default:
-        debugLine('[EVENT] ' + ev.kind);
-    }
-  }
-
-  async function pollChat() {
-    let d;
-    try { d = await (await fetch('/api/p2p/poll?since=' + chatCursor)).json(); }
-    catch { return; }
-    chatCursor = d.cursor;
-    (d.events || []).forEach(handleEvent);
-    // keep the indicator honest even between explicit connect/disconnect events
-    const st = $('p2p-chat-status');
-    if (d.connected && st.textContent !== 'Connected') setChatConnected(true);
-    if (!d.connected && st.textContent === 'Connected') setChatConnected(false);
-  }
-
-  async function sendChat() {
-    const inp = $('p2p-chat-msg');
-    const text = inp.value;
-    if (!text.trim()) return;
-    inp.value = '';
-    appendMsg('you', text);            // immediate local echo (spec)
-    debugLine('[CHAT SENT] ' + text);
-    const d = await post('/api/p2p/send', { msg: text });
-    if (!d.ok) { debugLine('[SEND FAILED] ' + (d.error || '')); appendMsg('you', '(failed to send: ' + (d.error || 'unknown') + ')'); }
-  }
-
+  // ---- connect (client) ----------------------------------------------------
   async function connect() {
     const ip = $('p2p-c-ip').value.trim();
     const port = parseInt($('p2p-c-port').value, 10) || 8131;
     const code = $('p2p-c-code').value.trim().toUpperCase();
     if (!ip) { setStatus('p2p-connect-status', 'enter the host IP', true); return; }
-    if (!code) { setStatus('p2p-connect-status', 'enter the session code', true); return; }
+    if (code.length < 14) { setStatus('p2p-connect-status', 'enter the full session code', true); return; }
     setStatus('p2p-connect-status', 'connecting…');
-    // persistent chat connection (new route; the one-shot /api/p2p/connect is untouched)
-    const d = await post('/api/p2p/chat/connect', { ip, port, code });
-    if (d.ok) {
-      setStatus('p2p-connect-status', '✓ connected');
-      $('p2p-chat-log').textContent = '';        // fresh session (no persistence)
-      setChatConnected(true);
-      debugLine('[CONNECTION ESTABLISHED] ' + ip + ':' + port);
-    } else if (d.result === 'auth_fail') {
-      setStatus('p2p-connect-status', '✗ rejected — bad or expired code', true);
-      setAuthFailed();
-    } else {
-      setStatus('p2p-connect-status', '✗ ' + (d.error || 'could not connect'), true);
-      setChatConnected(false);
-    }
+    const d = await P2P.connect(ip, port, code);
+    if (d.ok) { role = 'client'; setStatus('p2p-connect-status', '✓ connected'); onConnected(); }
+    else if (d.result === 'auth_fail') { setStatus('p2p-connect-status', '✗ rejected — bad or expired code', true); }
+    else { setStatus('p2p-connect-status', '✗ ' + (d.error || 'could not connect'), true); }
   }
 
+  // Session-code input: "AEYE-" locked, hyphens auto-inserted, alnum only, all caps.
+  function formatCode() {
+    const inp = $('p2p-c-code');
+    let raw = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, '');   // drop invalid chars
+    if (raw.indexOf('AEYE') === 0) raw = raw.slice(4);             // strip the fixed prefix
+    raw = raw.slice(0, 8);                                         // 8 payload chars max
+    let out = 'AEYE-' + raw.slice(0, 4);
+    if (raw.length >= 4) out += '-' + raw.slice(4);
+    inp.value = out;
+  }
+
+  // ---- phonetic slide-out --------------------------------------------------
+  function togglePhon() {
+    const shell = document.querySelector('#p2p-modal .p2p-shell');
+    if (shell) shell.classList.toggle('phon-open');
+  }
+
+  // ---- main-UI chat panel --------------------------------------------------
+  function positionChat() {
+    const el = $('p2p-chat'), hdr = document.querySelector('header');
+    if (el && hdr) el.style.top = (hdr.offsetHeight + 8) + 'px';
+  }
+  function setChatStatus(text, cls) {
+    const s = $('p2p-chat-status'); if (s) { s.textContent = text; s.className = 'p2p-status ' + (cls || 'ok'); }
+  }
+  function appendMsg(who, text) {
+    const log = $('p2p-chat-log'), d = document.createElement('div');
+    d.className = 'p2p-msg ' + (who === 'you' ? 'me' : (who === 'sys' ? 'dbg' : 'peer'));
+    d.textContent = (who === 'you' ? 'you  ' : (who === 'sys' ? '' : 'peer  ')) + text;
+    log.appendChild(d); log.scrollTop = log.scrollHeight;
+  }
+  // debug lines only surface when Debug Mode (Manage > Chat) is on
+  function debugMsg(line) { if ($('p2p-debug') && $('p2p-debug').checked) appendMsg('sys', line); }
+
+  function onConnected() {
+    if (connected) return;
+    connected = true;
+    $('p2p-modal').classList.add('hidden');       // close the setup window
+    $('p2p-chat-log').textContent = '';           // fresh session (no persistence)
+    positionChat();
+    const el = $('p2p-chat');
+    el.classList.remove('hidden', 'collapsed');
+    $('p2p-chat-collapse').textContent = '▲';
+    setChatStatus('Connected', 'ok');
+    $('p2p-chat-msg').disabled = false; $('p2p-chat-send').disabled = false;
+    $('p2p-chat-msg').focus();
+    startPolling();
+  }
+  function onDisconnected() {
+    connected = false;
+    $('p2p-chat').classList.add('hidden');
+    setChatStatus('Disconnected', 'off');
+    role = null;
+  }
   async function disconnect() {
-    await post('/api/p2p/chat/disconnect', {});
-    setChatConnected(false);
+    if (role === 'host' || hostActive) { await P2P.hostStop(); hostActive = false; }
+    else { await P2P.disconnect(); }
+    onDisconnected();
+  }
+  async function sendChat() {
+    const inp = $('p2p-chat-msg'), text = inp.value;
+    if (!text.trim()) return;
+    inp.value = ''; appendMsg('you', text); debugMsg('[CHAT SENT] ' + text);
+    const d = await P2P.send(text);
+    if (!d.ok) { debugMsg('[SEND FAILED] ' + (d.error || '')); appendMsg('you', '(failed to send: ' + (d.error || 'unknown') + ')'); }
+  }
+  function toggleCollapse() {
+    const c = $('p2p-chat').classList.toggle('collapsed');
+    $('p2p-chat-collapse').textContent = c ? '▼' : '▲';
   }
 
-  // Debug Mode: sync to the backend so message CONTENTS stay out of the server
-  // logs when off (they still show in the chat window). Frontend verbose lines
-  // are gated separately in debugLine().
-  async function syncDebug() {
-    try { await post('/api/p2p/debug', { enabled: $('p2p-debug').checked }); }
-    catch { /* ignore */ }
+  // ---- event poll (connection detection + messages) ------------------------
+  async function pollEvents() {
+    let d; try { d = await P2P.poll(chatCursor); } catch { return; }
+    chatCursor = d.cursor;
+    (d.events || []).forEach((ev) => {
+      if (ev.kind === 'chat') appendMsg('peer', ev.msg);
+      else if (ev.kind === 'connected') debugMsg('[CONNECTION ESTABLISHED] ' + (ev.peer || ''));
+      else if (ev.kind === 'disconnected') debugMsg('[DISCONNECTED] ' + (ev.peer || ''));
+      else if (ev.kind === 'invalid') debugMsg('[INVALID MESSAGE] ' + (ev.reason || ''));
+    });
+    // let the hub's own view of the socket drive connect/disconnect (robust to
+    // missed events / reload)
+    if (d.connected && !connected) onConnected();
+    if (!d.connected && connected) onDisconnected();
+    if (!engaged()) stopPolling();
   }
 
+  function startPolling() {
+    if (!pollTimer) pollTimer = setInterval(pollEvents, 800);
+    if (!statusTimer) statusTimer = setInterval(refreshStatus, 2000);
+  }
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  }
+
+  // ---- network tools -------------------------------------------------------
   async function toggleUpnp() {
     const enable = $('p2p-upnp').checked;
     setStatus('p2p-upnp-status', enable ? 'requesting UPnP…' : 'removing forward…');
-    const d = await post('/api/p2p/upnp', { enable });
-    if (d.ok) {
-      setStatus('p2p-upnp-status', '✓ port ' + d.port + ' forwarded');
-    } else {
-      setStatus('p2p-upnp-status', d.note || 'UPnP unavailable', true);
-      if (enable) $('p2p-upnp').checked = false;
-    }
+    const d = await P2P.upnp(enable);
+    if (d.ok) setStatus('p2p-upnp-status', '✓ port ' + d.port + ' forwarded');
+    else { setStatus('p2p-upnp-status', d.note || 'UPnP unavailable', true); if (enable) $('p2p-upnp').checked = false; }
   }
-
   function openGuide() {
     if (window.SIDEBAR && window.SIDEBAR.open) { window.SIDEBAR.open(GUIDE_URL); return; }
-    fetch('/api/open', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: GUIDE_URL }),
-    }).catch(() => {});
+    fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: GUIDE_URL }) }).catch(() => {});
   }
 
-  // ---- polling lifecycle ---------------------------------------------------
-  function startPolling() {
-    if (!statusTimer) statusTimer = setInterval(refreshStatus, 2000);
-    if (!chatTimer) chatTimer = setInterval(pollChat, 700);
-  }
-  function stopPolling() {
-    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
-    if (chatTimer) { clearInterval(chatTimer); chatTimer = null; }
-  }
-
+  // ---- window open ---------------------------------------------------------
   async function openWindow() {
     $('p2p-modal').classList.remove('hidden');
     refreshStatus();
-    syncDebug();                          // align backend logging with the checkbox
-    // prime the chat cursor to the current tail so we don't replay old events
-    try {
-      const d = await (await fetch('/api/p2p/poll?since=0')).json();
-      chatCursor = d.cursor;
-      setChatConnected(!!d.connected);
-    } catch { /* ignore */ }
+    try { const d = await P2P.poll(0); chatCursor = d.cursor; } catch { /* ignore */ }
     startPolling();
   }
 
   function wire() {
     const btn = $('p2p-btn');
-    if (!btn) return;                    // p2p disabled / older markup
+    if (!btn) return;
     btn.addEventListener('click', openWindow);
+    // setup window
     $('p2p-host-start').addEventListener('click', startHost);
     $('p2p-host-stop').addEventListener('click', stopHost);
     $('p2p-connect').addEventListener('click', connect);
-    $('p2p-c-code').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); connect(); }
-    });
+    $('p2p-phon-toggle').addEventListener('click', togglePhon);
     $('p2p-upnp').addEventListener('change', toggleUpnp);
     $('p2p-guide').addEventListener('click', openGuide);
+    // session-code auto-format
+    const code = $('p2p-c-code');
+    code.value = 'AEYE-';
+    code.addEventListener('input', formatCode);
+    code.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); connect(); } });
+    // main-UI chat panel
     $('p2p-chat-send').addEventListener('click', sendChat);
-    $('p2p-chat-msg').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
-    });
+    $('p2p-chat-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendChat(); } });
+    $('p2p-chat-collapse').addEventListener('click', toggleCollapse);
     $('p2p-chat-disconnect').addEventListener('click', disconnect);
-    $('p2p-debug').addEventListener('change', syncDebug);
-    // library.js hides the overlay (backdrop / × / Esc); stop polling when it goes.
+    window.addEventListener('resize', () => { if (connected) positionChat(); });
+    // Debug Mode (Manage > Chat) -> sync backend logging verbosity
+    const dbg = $('p2p-debug');
+    if (dbg) dbg.addEventListener('change', () => P2P.setDebug(dbg.checked).catch(() => {}));
+    // when the setup window is dismissed, tidy the phonetic drawer + stop polling if idle
     const modal = $('p2p-modal');
-    new MutationObserver(() => { if (modal.classList.contains('hidden')) stopPolling(); })
-      .observe(modal, { attributes: true, attributeFilter: ['class'] });
+    new MutationObserver(() => {
+      if (modal.classList.contains('hidden')) {
+        const shell = modal.querySelector('.p2p-shell');
+        if (shell) shell.classList.remove('phon-open');
+        if (!engaged()) stopPolling();
+      }
+    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);

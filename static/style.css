@@ -1350,7 +1350,7 @@ body.sb-open #sidebar-tab { display: none; }
 .p2p-status.off { color: var(--sclera); }
 .p2p-status.err { color: var(--vein); border-color: var(--vein); }
 .p2p-chat-log {
-  height: 150px; overflow-y: auto; margin: 8px 0; padding: 6px 8px;
+  flex: 1 1 auto; min-height: 90px; overflow-y: auto; padding: 6px 8px;
   background: var(--well); border: 1px solid var(--line); border-radius: 4px;
   font-size: 12px; line-height: 1.5; display: flex; flex-direction: column; gap: 3px;
 }
@@ -1364,3 +1364,52 @@ body.sb-open #sidebar-tab { display: none; }
   border: 1px solid var(--line); border-radius: 4px; font: 12px var(--mono); padding: 5px 8px;
 }
 .p2p-chat-input input:disabled { opacity: .5; }
+
+/* ---- phonetic slide-out drawer (P2P setup window) ---- */
+.p2p-shell { position: relative; }        /* anchor for the drawer + toggle */
+.p2p-phon-toggle {
+  background: none; border: 1px solid var(--line); border-radius: 4px;
+  color: var(--sclera); cursor: pointer; padding: 2px 9px; font-size: 14px; line-height: 1;
+}
+.p2p-phon-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.p2p-phon {
+  position: absolute; top: 0; right: calc(100% + 10px); width: 178px; height: 100%;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; overflow-y: auto; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+  transform: translateX(20px); opacity: 0; pointer-events: none;
+  transition: transform .22s ease, opacity .22s ease;
+}
+.p2p-shell.phon-open .p2p-phon { transform: translateX(0); opacity: 1; pointer-events: auto; }
+.p2p-phon-head { color: var(--accent); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+.p2p-phon-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.p2p-phon-list li { color: var(--sclera); }
+.p2p-phon-list b { color: var(--fg); display: inline-block; width: 16px; }
+
+/* ---- P2P chat panel, embedded + centred in the main UI ----
+   fixed so the sidebar browser opening/closing never nudges it; capped width so
+   it never covers the eye (left) or the browser (right) */
+.p2p-chat {
+  position: fixed; top: 200px; left: 50%; transform: translateX(-50%);
+  width: min(760px, 82vw); max-height: 48vh; z-index: 45;
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.55);
+}
+.p2p-chat.hidden { display: none; }
+.p2p-chat.collapsed { max-height: none; }
+.p2p-chat-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-bottom: 1px solid var(--line);
+}
+.p2p-chat-title { color: var(--accent); font-size: 12px; letter-spacing: 2px; }
+.p2p-chat-spacer { flex: 1; }
+.p2p-chat-collapse {
+  background: none; border: 1px solid var(--line); border-radius: 4px;
+  color: var(--sclera); cursor: pointer; padding: 1px 9px; font-size: 12px; line-height: 1.4;
+}
+.p2p-chat-collapse:hover { color: var(--accent); border-color: var(--accent); }
+.p2p-chat-body {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  gap: 8px; padding: 8px 10px;
+}
+.p2p-chat.collapsed .p2p-chat-body { display: none; }

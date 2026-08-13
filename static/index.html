@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=13">
+<link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body data-state="idle">
 <script>
@@ -207,6 +207,7 @@ if (!localStorage.getItem('aeye-default-v3')) {
         <button class="tab" data-tab="tab-stt" type="button">STT</button>
         <button class="tab" data-tab="tab-settings" type="button">settings</button>
         <button class="tab" data-tab="tab-plugins" type="button">plugins</button>
+        <button class="tab" data-tab="tab-p2p" type="button">chat</button>
       </div>
       <div class="modal-body">
         <div class="tab-panel on" id="tab-models">
@@ -532,6 +533,15 @@ if (!localStorage.getItem('aeye-default-v3')) {
             </div>
           </fieldset>
         </div>
+        <div class="tab-panel" id="tab-p2p">
+          <fieldset>
+            <legend>P2P chat</legend>
+            <label class="chk"><input id="p2p-debug" type="checkbox"> Debug Mode</label>
+            <div class="fieldset-hint">On: verbose connection, message and error logs. Off: minimal &mdash; message contents stay out of the logs.</div>
+            <div class="ticker-cfg-head" style="margin-top:10px">Listener log</div>
+            <pre id="p2p-log" class="p2p-log"></pre>
+          </fieldset>
+        </div>
       </div>
     </div>
   </div>
@@ -683,8 +693,24 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 
   <!-- ============ ENCRYPTED P2P (Phase 1: session handshake) ============ -->
   <div class="overlay hidden" id="p2p-modal">
-    <div class="modal modal-narrow">
+    <div class="modal modal-narrow p2p-shell">
+      <!-- phonetic alphabet: slide-out drawer on the left, hidden by default -->
+      <aside id="p2p-phon" class="p2p-phon" aria-hidden="true">
+        <div class="p2p-phon-head">NATO phonetic</div>
+        <ul class="p2p-phon-list">
+          <li><b>A</b> Alfa</li><li><b>B</b> Bravo</li><li><b>C</b> Charlie</li>
+          <li><b>D</b> Delta</li><li><b>E</b> Echo</li><li><b>F</b> Foxtrot</li>
+          <li><b>G</b> Golf</li><li><b>H</b> Hotel</li><li><b>I</b> India</li>
+          <li><b>J</b> Juliett</li><li><b>K</b> Kilo</li><li><b>L</b> Lima</li>
+          <li><b>M</b> Mike</li><li><b>N</b> November</li><li><b>O</b> Oscar</li>
+          <li><b>P</b> Papa</li><li><b>Q</b> Quebec</li><li><b>R</b> Romeo</li>
+          <li><b>S</b> Sierra</li><li><b>T</b> Tango</li><li><b>U</b> Uniform</li>
+          <li><b>V</b> Victor</li><li><b>W</b> Whiskey</li><li><b>X</b> X-ray</li>
+          <li><b>Y</b> Yankee</li><li><b>Z</b> Zulu</li>
+        </ul>
+      </aside>
       <div class="modal-head">
+        <button id="p2p-phon-toggle" class="p2p-phon-toggle" type="button" title="NATO phonetic alphabet">&#9776;</button>
         <span class="modal-title">&#9673; P2P</span>
         <span class="modal-sub">direct peer-to-peer &mdash; session handshake</span>
         <button class="close" data-close="p2p-modal">&times;</button>
@@ -731,24 +757,25 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
           <div class="fieldset-hint">To be reachable over the internet, forward this port on your router to this PC. Auto-forwarding uses UPnP if your router allows it (stubbed in this build &mdash; returns unavailable for now).</div>
         </fieldset>
 
-        <fieldset class="p2p-sec">
-          <legend>Chat</legend>
-          <div class="p2p-row">
-            <span id="p2p-chat-status" class="p2p-status off">Disconnected</span>
-            <button id="p2p-chat-disconnect" type="button" class="ghost hidden">Disconnect</button>
-            <label class="chk" style="margin-left:auto"><input id="p2p-debug" type="checkbox"> Debug Mode</label>
-          </div>
-          <div id="p2p-chat-log" class="p2p-chat-log" aria-live="polite"></div>
-          <div class="p2p-chat-input">
-            <input id="p2p-chat-msg" spellcheck="true" autocomplete="off" placeholder="type a message…" disabled>
-            <button id="p2p-chat-send" type="button" disabled>Send</button>
-          </div>
-        </fieldset>
+      </div>
+    </div>
+  </div>
 
-        <details class="p2p-log-wrap">
-          <summary>Listener log</summary>
-          <pre id="p2p-log" class="p2p-log"></pre>
-        </details>
+  <!-- ===== P2P chat, embedded in the main UI (injected on connection) ===== -->
+  <!-- fixed + centred so it's unaffected by the sidebar browser opening/closing -->
+  <div id="p2p-chat" class="p2p-chat hidden">
+    <div class="p2p-chat-bar">
+      <span class="p2p-chat-title">&#9673; P2P</span>
+      <span id="p2p-chat-status" class="p2p-status ok">Connected</span>
+      <span class="p2p-chat-spacer"></span>
+      <button id="p2p-chat-collapse" class="p2p-chat-collapse" type="button" title="Collapse / expand">&#9650;</button>
+      <button id="p2p-chat-disconnect" class="ghost" type="button">Disconnect</button>
+    </div>
+    <div class="p2p-chat-body">
+      <div id="p2p-chat-log" class="p2p-chat-log" aria-live="polite"></div>
+      <div class="p2p-chat-input">
+        <input id="p2p-chat-msg" spellcheck="true" autocomplete="off" placeholder="type a message…">
+        <button id="p2p-chat-send" type="button">Send</button>
       </div>
     </div>
   </div>
@@ -771,7 +798,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
 <script src="/static/plugins.js?v=4"></script>
-<script src="/static/p2p.js?v=3"></script>
+<script src="/static/p2p.js?v=4"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>
 /* replace the native white number-spinner on EVERY number input (header knobs,
