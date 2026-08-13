@@ -252,14 +252,33 @@
     s.className = 'tick tk-board-notice' + (warn ? ' warn' : '');
     s.textContent = text;
     t.appendChild(s);
+    lane.dataset.sig = '';                        // force a rebuild when titles return
+  }
+
+  // how far through its scroll loop a lane is [0,1), from the last render's
+  // timing -- lets a refresh resume in place instead of snapping back to 0.
+  function animPhase(lane) {
+    const dur = parseFloat(lane.dataset.dur || '0');
+    const start = parseFloat(lane.dataset.start || '0');
+    if (!dur || !start) return 0;
+    return (((performance.now() - start) / 1000 / dur) % 1 + 1) % 1;
   }
 
   function renderLane(lane, items, dir) {
     const track = trackOf(lane);
+    if (!items.length) {
+      track.style.animation = 'none'; track.style.transform = 'none';
+      track.textContent = ''; lane.dataset.sig = ''; return;
+    }
+    // identical titles + direction -> leave the strip scrolling. A rebuild
+    // restarts the animation (a visible jump), so skip it unless it changed.
+    const sig = dir + ' ' + items.map((it) => it.title + '' + it.url).join(' ');
+    if (lane.dataset.sig === sig && track.querySelector('.tick-seq')) return;
+    lane.dataset.sig = sig;
+    const frac = animPhase(lane);                 // capture progress before rebuild
     track.style.animation = 'none';
     track.style.transform = 'none';
     track.textContent = '';
-    if (!items.length) return;
     const id = lane.dataset.board;
     const seq = document.createElement('span');
     seq.className = 'tick-seq';
@@ -283,6 +302,11 @@
     track.style.animationIterationCount = 'infinite';
     // 'rl' (right->left) runs the keyframe forwards; 'lr' (left->right) reverses
     track.style.animationDirection = (dir === 'lr') ? 'reverse' : 'normal';
+    // resume mid-loop with a negative delay so a refresh doesn't jump back to 0.
+    const delay = frac * dur;
+    track.style.animationDelay = (-delay) + 's';
+    lane.dataset.dur = dur;
+    lane.dataset.start = String(performance.now() - delay * 1000);
   }
 
   // ---- polling ---------------------------------------------------------------

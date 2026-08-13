@@ -592,8 +592,18 @@ body[data-state="loading"]  #eye-status { animation: pulse 1.1s ease-in-out infi
   position: absolute; inset: 0; z-index: -1;
   display: none; align-items: center; justify-content: center;
   overflow: hidden; pointer-events: none; user-select: none;
+  /* ease the re-centre offset in lockstep with the sidebar's flex-basis
+     (.25s ease) so the skull holds the window centre instead of snapping
+     right and drifting back when the browser opens/closes */
+  transition: right .25s ease;
 }
 body.eye-hidden #skull-layer { display: flex; }
+/* keep the skull centred on the WHOLE app, not just the chat column: when the
+   browser sidebar (420px) is open the chat column shrinks left, so extend the
+   backdrop rightward by the sidebar width to re-centre the skull on the window.
+   It sits behind the opaque sidebar (z-index:-1), and the ~400px skull lands
+   left of the sidebar, so nothing is clipped. */
+body.eye-hidden.sb-open #skull-layer { right: -420px; }
 #skull-layer pre {
   margin: 0; font-family: var(--mono);
   font-size: 12px; line-height: 1.05;

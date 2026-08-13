@@ -117,19 +117,34 @@
     t.style.animation = 'none';
     t.style.transform = 'none';
     t.innerHTML = '<span class="tick tick-off">⚠ ticker offline</span>';
+    lane.dataset.sig = '';                        // force a rebuild when quotes return
+  }
+
+  // how far through its scroll loop a lane is [0,1), from the last render's
+  // timing -- lets a refresh resume in place instead of snapping back to 0.
+  function animPhase(lane) {
+    const dur = parseFloat(lane.dataset.dur || '0');
+    const start = parseFloat(lane.dataset.start || '0');
+    if (!dur || !start) return 0;
+    return (((performance.now() - start) / 1000 / dur) % 1 + 1) % 1;
   }
 
   function renderLane(lane, quotes) {
     const track = trackOf(lane);
+    if (!quotes.length) {
+      track.style.animation = 'none'; track.style.transform = 'none';
+      track.innerHTML = ''; lane.dataset.sig = ''; return;
+    }
+    const base = quotes.map(itemHTML).join('');
+    // identical content -> leave the marquee running. Rebuilding restarts the
+    // animation (a visible jump), so only rebuild when the strip actually changed.
+    if (lane.dataset.sig === base && track.querySelector('.tick-seq')) return;
+    lane.dataset.sig = base;
+    const frac = animPhase(lane);                 // capture progress before rebuild
     track.style.animation = 'none';
     track.style.transform = 'none';
-    if (!quotes.length) { track.innerHTML = ''; return; }
-    const base = quotes.map(itemHTML).join('');
-    // one sequence first, so we can measure it and repeat the items until a
-    // single sequence fills the lane -- a sparse strip (one symbol) then still
-    // scrolls seamlessly instead of showing a gap between the two copies.
-    // Measured SYNCHRONOUSLY (reading scrollWidth forces the reflow): rAF is
-    // paused while the tab reports hidden, so a deferred layout pass can stall.
+    // measure one sequence, then repeat it until it fills the lane, so a sparse
+    // strip still loops seamlessly. Reading scrollWidth forces a sync reflow.
     track.innerHTML = '<span class="tick-seq">' + base + '</span>';
     const laneW = lane.clientWidth || 320;
     const seq = track.querySelector('.tick-seq');
@@ -144,17 +159,18 @@
     const w = track.querySelector('.tick-seq').scrollWidth || 320;
     const dur = Math.max(12, w / 45);            // ~constant 45 px/s pace
     void track.offsetWidth;                      // reflow so the restart takes
-    // set longhands, not the shorthand -- a var() in the `animation` shorthand
-    // won't parse via CSSOM (leaves animation:none)
+    // longhands, not the shorthand -- a var() in `animation` won't parse via CSSOM
     track.style.animationName = 'tick-scroll';
     track.style.animationDuration = dur + 's';
     track.style.animationTimingFunction = 'linear';
     track.style.animationIterationCount = 'infinite';
-    // commodities (left) drift right->left; crypto (right) left->right, so the
-    // two strips move in opposite directions (reverse just runs the same
-    // keyframe backwards). Set explicitly -- the `animation:'none'` reset above
-    // clears direction inline, so a CSS rule wouldn't stick.
+    // commodities (left) drift right->left; crypto (right) left->right.
     track.style.animationDirection = (lane.id === 'ticker-right') ? 'reverse' : 'normal';
+    // resume mid-loop with a negative delay so a refresh doesn't jump back to 0.
+    const delay = frac * dur;
+    track.style.animationDelay = (-delay) + 's';
+    lane.dataset.dur = dur;
+    lane.dataset.start = String(performance.now() - delay * 1000);
   }
 
   // ---- polling ---------------------------------------------------------------
