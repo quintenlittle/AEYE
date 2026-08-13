@@ -8,7 +8,7 @@ talk to it and have it talk back — all **100% on your machine**, with nothing
 phoning home by default. The whole interface is **100% hackable** (plain
 HTML/CSS/JS you can rewrite) and extendable with **custom plugins**. Over it all,
 a procedurally-rendered ASCII **eye follows your mouse cursor** — it watches,
-thinks, speaks, and gets blindly upset when you click on it.
+thinks, speaks, and gets pretty unpredictable when you click on it.
 
 **Runs on modest hardware, too:** nothing auto-loads at boot, every model is
 tagged for *your* GPU/RAM (with CPU-only picks), and the GPU-hungry extras — the
@@ -22,7 +22,7 @@ animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 > [release page](https://github.com/quintenlittle/aeye/releases/latest). If Defender
 > false-flags the installer (common for unsigned apps), restore that one file from Windows
 > Security → **Protection history**.
-> Alternatively, you can just temporarily disable Windows Defender and re-enable it after the installation finishes.
+> Alternatively, you can just temporarily disable Windows Defender and re-enable everything after the installation finishes.
 
 <img width="870" height="1807" alt="Instructions" src="https://github.com/user-attachments/assets/bd94143d-beb3-4e33-8e73-a3ffb57893a4" />
 
