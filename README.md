@@ -429,8 +429,17 @@ shares a short code; the other **connects** to it over a plain TCP socket
   rejected cleanly.
 - **Chat** — once connected, messages go back and forth in real time
   (newline-delimited JSON over the socket); your own messages echo immediately.
-- **Network Tools** — a checkbox for **UPnP** auto port-forwarding (stubbed for
-  now) and a link to a **port-forwarding guide**, for reaching a peer across the
+- **File transfer** — send **any file** straight to the connected peer over the
+  same **encrypted TLS** connection. **Drag & drop** it onto the chat panel, hit
+  the **paperclip** in the chat bar, or use **Upload File** in the P2P window. Files
+  are split into configurable chunks (**64–256 KB**), streamed across interleaved
+  lanes on the single socket and reassembled by index, with real-time progress —
+  speed, chunk count, ETA — in the chat box and a **Details / Pieces / Bandwidth**
+  panel in the P2P window. Incoming files land on your **Desktop** (or Downloads,
+  your choice). With Debug **off**, nothing is logged and no file names or transfer
+  data are stored — it all stays in memory for the session only.
+- **Network Tools** — a checkbox for **UPnP** auto port-forwarding (**in progress**)
+  and a link to a **port-forwarding guide**, for reaching a peer across the
   internet. On the same LAN, the local IP + port is enough.
 - **Debug Mode** — off by default; on, it surfaces verbose connection/error
   logs. Off keeps message **contents out of the logs** entirely.
@@ -438,8 +447,8 @@ shares a short code; the other **connects** to it over a plain TCP socket
 If a connection is blocked it's almost always a **VPN or firewall** — the window
 says so and suggests disabling the VPN or allowing AEYE through the firewall.
 
-Still early: this layer is now fully encrypted with TLS, encrypted file transfers
-in progress, planned release date is next week **08/17/2026 - 08/21/2026**.
+This layer is **fully encrypted with TLS**, and **direct P2P file transfer** is now
+live (see above). **UPnP auto port-forwarding** is in progress.
 
 **Future mesh network chat compatibility on deck** - no planned release date yet...
 
