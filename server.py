@@ -2569,7 +2569,9 @@ def _plugin_load(pid: str, path: str) -> dict:
     instead of raising, so one broken plugin never hides the rest."""
     base = {"id": pid, "name": pid, "trigger": "", "description": "",
             "command": [], "cwd": ".", "timeout": 120, "error": None,
-            "requirements": "", "installed": False, "mode": "stream"}
+            "requirements": "", "installed": False, "mode": "stream",
+            # agentic-tool fields (all optional -- absent => a normal trigger plugin)
+            "type": "command", "access": "exec", "args": []}
     try:
         with open(os.path.join(path, "aeye-plugin.json"), encoding="utf-8") as f:
             m = json.load(f)
@@ -2582,12 +2584,36 @@ def _plugin_load(pid: str, path: str) -> dict:
     cmd = m.get("command")
     if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):
         base["error"] = "manifest 'command' must be a non-empty list of strings"
+    ptype = str(m.get("type") or "command").lower()
+    if ptype not in ("command", "tool"):
+        ptype = "command"
     trig = (m.get("trigger") or "").strip()
+    # a trigger is required for command plugins (how the user invokes them); for
+    # a tool plugin it doubles as the LLM-facing tool name and is still required.
     if not trig:
         base["error"] = base["error"] or "manifest 'trigger' is required"
     mode = str(m.get("mode") or "stream").lower()
     if mode not in ("stream", "terminal", "interactive"):
         mode = "stream"
+    access = str(m.get("access") or "exec").lower()
+    if access not in ("read", "write", "exec"):
+        access = "exec"
+    # args: [{name, type, description, required}] -- sanitised, tool plugins only
+    args = []
+    raw_args = m.get("args")
+    if isinstance(raw_args, list):
+        for a in raw_args[:12]:
+            if not isinstance(a, dict):
+                continue
+            an = str(a.get("name") or "").strip()
+            if not an or not re.match(r"^[A-Za-z_][A-Za-z0-9_]{0,39}$", an):
+                continue
+            atype = str(a.get("type") or "string").lower()
+            if atype not in ("string", "path", "number", "boolean"):
+                atype = "string"
+            args.append({"name": an, "type": atype,
+                         "description": str(a.get("description") or "")[:200],
+                         "required": bool(a.get("required", True))})
     base.update(name=str(m.get("name") or pid)[:80], trigger=trig[:60],
                 description=str(m.get("description") or "")[:300],
                 command=cmd if isinstance(cmd, list) else [],
@@ -2595,7 +2621,7 @@ def _plugin_load(pid: str, path: str) -> dict:
                 timeout=max(1, min(int(m.get("timeout") or 120), 1800)),
                 requirements=_plugin_reqfile(path, m),
                 installed=_plugin_venv_python(path) is not None,
-                mode=mode)
+                mode=mode, type=ptype, access=access, args=args)
     return base
 
 
@@ -2692,6 +2718,367 @@ def plugins_run(req: PluginRunReq):
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+# ==========================================================================
+# Agentic tools: let the LLM CALL plugins (and a few safe built-ins) as tools.
+#
+# This is ADDITIVE to the trigger system -- trigger plugins are untouched. A
+# plugin opts in with "type":"tool" in its manifest; the model emits a tool call
+# (detected frontend-side, mirroring the web-tool loop), and the frontend posts
+# it here to run. All the real guardrails live server-side so a crafted request
+# can't exceed them:
+#   * master switch (disabled by default -- AEYE stays purely interactive)
+#   * a permission MODE gates what may run: read < write < autonomous(exec)
+#   * every path argument is confined to a user-chosen ROOT dir (no escape)
+#   * built-in read_file/list_dir/write_file work out of the box; custom tools
+#     reuse the EXISTING plugin execution path (Python + Node, per-plugin venv).
+# --------------------------------------------------------------------------
+_AGENT_CFG_FILE = os.path.join(paths.DATA_DIR, "agent_tools.json")
+_agent_lock = threading.Lock()
+_TOOL_OUT_MAX = 16000            # cap tool output chars (truncate beyond this)
+_MODE_RANK = {"read": 0, "write": 1, "auto": 2}
+_ACCESS_RANK = {"read": 0, "write": 1, "exec": 2}
+# environment/dependency error signatures -- classified so the loop can stop early
+_ENV_ERR_RE = re.compile(
+    r"ModuleNotFoundError|ImportError|No module named|cannot import name|"
+    r"DLL load failed|AttributeError", re.I)
+
+
+def _truncate(s) -> str:
+    s = "" if s is None else str(s)
+    return s if len(s) <= _TOOL_OUT_MAX else s[:_TOOL_OUT_MAX] + "\n[TRUNCATED]"
+
+
+def _ok(output) -> dict:
+    """Structured success per the tool output contract."""
+    return {"success": True, "output": _truncate(output), "error": None}
+
+
+def _err(msg) -> dict:
+    """Structured failure -- a single clean line, never a stack trace."""
+    return {"success": False, "output": None, "error": str(msg)[:400]}
+
+
+def _sanitize_err(text: str):
+    """Collapse raw stderr/exception text to one clean line (no full traceback to
+    the model). Returns the message string."""
+    t = (text or "").strip()
+    lines = [ln for ln in t.splitlines() if ln.strip()]
+    # prefer the last line that looks like 'ExceptionType: message'
+    for ln in reversed(lines):
+        if re.match(r"^\w+(Error|Exception|Warning)\b", ln.strip()):
+            return ln.strip()[:400]
+    return (lines[-1].strip() if lines else "tool failed")[:400]
+
+
+def _agent_default_root() -> str:
+    docs = os.path.join(os.path.expanduser("~"), "Documents")
+    base = docs if os.path.isdir(docs) else os.path.expanduser("~")
+    return os.path.join(base, "AEYE-Agent")
+
+
+_agent_cfg = {"enabled": False, "mode": "read", "approval": "auto",
+              "root": _agent_default_root(), "debug": False}
+
+
+def _tool_log(kind: str, **kw) -> None:
+    """Dev-only tool lifecycle log ([TOOL CALL] / [TOOL RESULT]); silent unless
+    debug is enabled. Never prints args/output contents -- just names + status."""
+    if not _agent_cfg.get("debug"):
+        return
+    try:
+        print("AEYE {} {}".format(kind, " ".join(
+            "{}={}".format(k, v) for k, v in kw.items())), flush=True)
+    except Exception:
+        pass
+
+
+def _agent_cfg_load():
+    try:
+        with open(_AGENT_CFG_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        for k in ("enabled", "mode", "approval", "root", "debug"):
+            if k in d:
+                _agent_cfg[k] = d[k]
+    except Exception:
+        pass
+
+
+def _agent_cfg_save():
+    try:
+        with open(_AGENT_CFG_FILE, "w", encoding="utf-8") as f:
+            json.dump(_agent_cfg, f)
+    except Exception:
+        pass
+
+
+_agent_cfg_load()
+
+
+def _agent_root() -> str:
+    root = os.path.realpath(_agent_cfg.get("root") or _agent_default_root())
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError:
+        pass
+    return root
+
+
+def _confine(p: str) -> str:
+    """Resolve a (relative or absolute) path against the allowed root and REJECT
+    anything that escapes it. Returns the safe absolute path."""
+    root = _agent_root()
+    raw = (p or "").strip()
+    full = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(root, raw))
+    if os.path.commonpath([full, root]) != root:
+        raise ValueError("path '{}' is outside the allowed root".format(p))
+    return full
+
+
+def _mode_allows(access: str) -> bool:
+    mode = _agent_cfg.get("mode", "read")
+    return _ACCESS_RANK.get(access, 2) <= _MODE_RANK.get(mode, 0)
+
+
+# ---- built-in file tools (confined to the root; structured contract) -------
+_BUILTIN_TOOLS = [
+    {"name": "list_files", "access": "read", "source": "builtin",
+     "description": "List files and folders inside a directory in the workspace.",
+     "args": [{"name": "path", "type": "path", "required": False,
+               "description": "Directory relative to the workspace root (default: root)."}]},
+    {"name": "read_file", "access": "read", "source": "builtin",
+     "description": "Read and return the text contents of a file in the workspace.",
+     "args": [{"name": "path", "type": "path", "required": True,
+               "description": "File to read, relative to the workspace root."}]},
+    {"name": "write_file", "access": "write", "source": "builtin",
+     "description": "Create or overwrite a text file in the workspace with the given content.",
+     "args": [{"name": "path", "type": "path", "required": True,
+               "description": "File to write, relative to the workspace root."},
+              {"name": "content", "type": "string", "required": True,
+               "description": "The full text to write into the file."}]},
+]
+
+
+def _builtin_run(name: str, args: dict) -> dict:
+    """Run a built-in file tool. Paths go through _confine (safe_path). Always
+    returns the {success, output, error} contract."""
+    if name == "list_files":
+        d = _confine(args.get("path") or ".")
+        if not os.path.isdir(d):
+            return _err("not a directory: {}".format(args.get("path") or "."))
+        rows = []
+        for e in sorted(os.listdir(d))[:1000]:
+            fp = os.path.join(d, e)
+            rows.append(("[dir]  " if os.path.isdir(fp) else "       ") + e)
+        rel = os.path.relpath(d, _agent_root())
+        return _ok("Contents of {}:\n{}".format(
+            rel if rel != "." else "(workspace root)", "\n".join(rows) or "(empty)"))
+    if name == "read_file":
+        fp = _confine(args["path"])
+        if not os.path.isfile(fp):
+            return _err("no such file: {}".format(args["path"]))
+        with open(fp, "rb") as f:
+            data = f.read(_TOOL_OUT_MAX * 4 + 1)
+        return _ok(data.decode("utf-8", "replace"))
+    if name == "write_file":
+        fp = _confine(args["path"])
+        content = str(args.get("content", ""))
+        os.makedirs(os.path.dirname(fp) or _agent_root(), exist_ok=True)
+        with open(fp, "w", encoding="utf-8", newline="") as f:
+            f.write(content)
+        return _ok("Wrote {} bytes to {}".format(
+            len(content), os.path.relpath(fp, _agent_root())))
+    return _err("unknown built-in tool")
+
+
+def _tool_registry() -> list:
+    """All LLM-callable tools = built-ins + every plugin declaring type:tool."""
+    tools = [dict(t) for t in _BUILTIN_TOOLS]
+    for p in _plugins_all():
+        if p.get("type") == "tool" and not p.get("error") and p.get("trigger"):
+            tools.append({"name": p["trigger"], "access": p.get("access", "exec"),
+                          "source": "plugin", "id": p["id"],
+                          "description": p.get("description", ""),
+                          "args": p.get("args", [])})
+    return tools
+
+
+def _tool_by_name(name: str):
+    for t in _tool_registry():
+        if t["name"] == name:
+            return t
+    return None
+
+
+def _validate_args(tool: dict, args: dict):
+    """Schema check BEFORE execution: required present + non-empty, correct type.
+    Returns (clean_args, error_message_or_None). Path args stay strings here;
+    confinement (safe_path) happens at execution."""
+    clean = {}
+    for spec in tool.get("args", []):
+        an = spec["name"]
+        atype = spec.get("type", "string")
+        req = spec.get("required", True)
+        v = args.get(an)
+        empty = v is None or (isinstance(v, str) and v.strip() == "")
+        if empty:
+            if req:
+                return None, "missing or empty required argument '{}'".format(an)
+            continue
+        if atype == "number":
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                return None, "argument '{}' must be a number".format(an)
+        elif atype == "boolean":
+            v = bool(v)
+        else:
+            v = str(v)
+        clean[an] = v
+    return clean, None
+
+
+def _run_plugin_tool(tool: dict, args: dict) -> dict:
+    """Execute a type:tool plugin: named {arg} substitution into its argv (path
+    args pre-confined to the root), no shell, bounded output + timeout. Returns
+    the {success, output, error} contract; a plugin that already prints that
+    contract on stdout is passed through, otherwise its stdout is wrapped and any
+    stderr traceback is collapsed to one clean line (never leaked in full)."""
+    try:
+        path = _plugin_dir(tool["id"])
+        man = _plugin_load(tool["id"], path)
+        if man["error"]:
+            return _err(man["error"])
+        vals = {}
+        for spec in man.get("args", []):
+            an = spec["name"]
+            if an not in args:
+                continue
+            v = args[an]
+            if spec["type"] == "path":
+                v = _confine(str(v))          # absolute, confined -> safe for the tool
+            vals[an] = str(v)
+        argv = []
+        for part in man["command"]:
+            for an, v in vals.items():
+                part = part.replace("{" + an + "}", v)
+            argv.append(part)
+        if argv and argv[0] in ("python", "python3"):
+            vpy = _plugin_venv_python(path)
+            if vpy:
+                argv[0] = vpy
+        cwd = os.path.realpath(os.path.join(path, man["cwd"]))
+        if os.path.commonpath([cwd, os.path.realpath(PLUGINS_DIR)]) != os.path.realpath(PLUGINS_DIR):
+            return _err("plugin cwd escapes the plugins folder")
+        proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
+                              timeout=man["timeout"], creationflags=NOWIN)
+        stdout, stderr = proc.stdout or "", proc.stderr or ""
+        # pass through a tool that already speaks the contract
+        st = stdout.strip()
+        if st.startswith("{"):
+            try:
+                j = json.loads(st)
+                if isinstance(j, dict) and "success" in j:
+                    if j.get("success"):
+                        return _ok(j.get("output") or "")
+                    return _err(j.get("error") or "tool reported failure")
+            except Exception:
+                pass
+        if proc.returncode != 0 or (stderr and not stdout.strip()):
+            return _err(_sanitize_err(stderr or stdout))
+        return _ok(stdout)
+    except subprocess.TimeoutExpired:
+        return _err("tool timed out")
+    except FileNotFoundError:
+        return _err("tool command not found (is the runtime installed?)")
+    except ValueError as e:                       # path confinement / access denied
+        return _err(str(e))
+    except Exception as e:
+        return _err(type(e).__name__)
+
+
+class AgentCfgReq(BaseModel):
+    enabled: Optional[bool] = None
+    mode: Optional[str] = None            # "read" | "write" | "auto"
+    approval: Optional[str] = None        # "auto" | "confirm"
+    root: Optional[str] = None
+    debug: Optional[bool] = None          # dev-only tool lifecycle logging
+
+
+class ToolRunReq(BaseModel):
+    name: str
+    args: dict = {}
+
+
+@app.get("/api/plugins/tool/config")
+def agent_tool_config_get():
+    return {"ok": True, "config": dict(_agent_cfg), "root_resolved": _agent_root()}
+
+
+@app.post("/api/plugins/tool/config")
+def agent_tool_config_set(req: AgentCfgReq):
+    with _agent_lock:
+        if req.enabled is not None:
+            _agent_cfg["enabled"] = bool(req.enabled)
+        if req.mode in ("read", "write", "auto"):
+            _agent_cfg["mode"] = req.mode
+        if req.approval in ("auto", "confirm"):
+            _agent_cfg["approval"] = req.approval
+        if req.root is not None and str(req.root).strip():
+            _agent_cfg["root"] = str(req.root).strip()
+        if req.debug is not None:
+            _agent_cfg["debug"] = bool(req.debug)
+        _agent_cfg_save()
+    return {"ok": True, "config": dict(_agent_cfg), "root_resolved": _agent_root()}
+
+
+@app.get("/api/plugins/tools")
+def agent_tools_list():
+    """Tools available to the LLM, plus current config. `allowed` reflects the
+    active mode so the frontend only advertises what can actually run."""
+    reg = _tool_registry()
+    for t in reg:
+        t["allowed"] = _mode_allows(t.get("access", "exec"))
+    return {"ok": True, "tools": reg, "config": dict(_agent_cfg),
+            "root_resolved": _agent_root()}
+
+
+@app.post("/api/plugins/tool/run")
+def agent_tool_run(req: ToolRunReq):
+    """SAFE TOOL EXECUTION LAYER. Before running ANYTHING, validate in order:
+    master switch -> tool exists -> permission mode -> argument schema. Any failure
+    returns the {success, output, error} contract and does NOT execute. Path args
+    are confined to the root inside the tool. Never raises / leaks a stack trace."""
+    name = (req.name or "").strip()
+    _tool_log("[TOOL CALL]", tool=name or "?")
+    if not _agent_cfg.get("enabled"):
+        return _err("LLM tool access is disabled")
+    tool = _tool_by_name(name)
+    if not tool:                                  # validate tool exists
+        _tool_log("[TOOL RESULT]", tool=name, status="unknown_tool")
+        return _err("unknown tool '{}'".format(name))
+    if not _mode_allows(tool.get("access", "exec")):   # validate permission mode
+        _tool_log("[TOOL RESULT]", tool=name, status="denied_mode")
+        return _err("'{}' is not allowed in {} mode".format(name, _agent_cfg.get("mode")))
+    raw = req.args if isinstance(req.args, dict) else {}
+    clean, verr = _validate_args(tool, raw)       # validate + sanitize args
+    if verr:
+        _tool_log("[TOOL RESULT]", tool=name, status="invalid_args")
+        return _err(verr)
+    try:
+        if tool["source"] == "builtin":
+            res = _builtin_run(tool["name"], clean)
+        else:
+            res = _run_plugin_tool(tool, clean)
+    except ValueError as e:                        # path-confinement / access denied
+        res = _err(str(e))
+    except Exception as e:                          # never crash / leak a traceback
+        res = _err(type(e).__name__)
+    _tool_log("[TOOL RESULT]", tool=name,
+              status="ok" if res.get("success") else "error")
+    return res
 
 
 @app.post("/api/plugins/install")

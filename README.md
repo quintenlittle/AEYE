@@ -414,6 +414,33 @@ environment. A bundled **`echo`** sample shows the format and the **`rss`** read
 (below) is a working example; you can also install one straight from a GitHub URL
 and edit its manifest in the built-in editor.
 
+### Agentic tools — let the model use your plugins *(work in progress)*
+
+> **⚠️ Work in progress.** The agent layer is functional but still being hardened.
+> It's **off by default** and confined to a folder you choose — but treat it as
+> experimental. Strong tool-capable models follow the format most reliably.
+
+Beyond user-typed triggers, a plugin can opt in as a **tool the LLM calls itself**.
+Turn on **Allow LLM Tool Access** in **Manage → Plugins**, pick a **permission
+mode** and a **workspace folder**, and the model can read and write files (and run
+your custom tools) to actually *do* things — not just talk about them.
+
+- **Built-in file tools** work out of the box: `read_file`, `write_file`,
+  `list_files` — all confined to your workspace folder.
+- **Custom tools**: any plugin whose manifest declares `"type":"tool"` (with a
+  `description` and typed `args`) becomes callable by the model, reusing the same
+  plugin runner (Python **and** Node). A bundled **`word_count`** sample shows the shape.
+- **Permission modes** — **Read Only** (read/list) · **Read + Write** (+ create/edit) ·
+  **Autonomous** (all tools) — plus an optional **Confirm writes & exec** approval prompt.
+- **Guardrails**: strict JSON tool-call format, a hard filesystem sandbox (paths
+  outside the root are rejected — no `..`, no drive-switching), per-turn call limits,
+  repeat-failure / duplicate-call / dependency-error stops, output caps, and a
+  structured `{success, output, error}` result contract. Sanitized errors only —
+  never raw stack traces.
+
+Off by default, everything is enforced **server-side**, and no files are ever
+deleted. The whole thing stays local — nothing leaves your machine.
+
 ## Peer-to-peer (P2P)
 
 Open **p2p** in the top bar to talk **directly to another AEYE instance** — no
@@ -538,7 +565,7 @@ aeye/
 ├── installer/           Inno Setup script -> aeye-setup-vX.Y.Z.exe (the installer)
 ├── assets/              installer assets (WebView2 bootstrapper, skull frames, icon)
 ├── tools/               extras / Ollama / relay setup scripts run by the installer
-├── plugins/             bundled sample plugins (echo, rss)
+├── plugins/             bundled sample plugins (echo, rss, word_count tool)
 ├── requirements*.txt    core + optional (hf / img / tts / stt) deps
 ├── install.bat          dev only: set up a local .venv and run from source
 ├── start.bat            dev only: run server + browser from source

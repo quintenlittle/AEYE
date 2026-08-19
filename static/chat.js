@@ -462,6 +462,8 @@
 
   // max web tool-call round-trips per user turn before we force a final answer
   const MAX_WEB_ROUNDS = 3;
+  // hard cap on tool calls per user turn (loop-control -- prevents runaway)
+  const MAX_TOOL_CALLS = 5;
 
   // stream one /api/chat call into `out`, returning the accumulated reply text.
   // voiceMode controls live TTS, which tracks the typewriter token-by-token:
@@ -490,7 +492,8 @@
         if (window.VOICE && voiceMode !== 'off' && !voiceDead) {
           let speak = voiceMode === 'live';
           if (voiceMode === 'guarded') {
-            if (window.WEB && WEB.toolish(acc)) {
+            if ((window.WEB && WEB.toolish(acc)) ||
+                (window.TOOLS && TOOLS.enabled() && /^\s*[<{`]/.test(acc))) {
               // tool-call / faked wrapper -> go (and stay) silent this round;
               // cut off anything already speaking (e.g. a greeting before a fake)
               voiceDead = true;
@@ -541,12 +544,17 @@
     if (window.DOCS) { try { docCtx = await DOCS.contextFor(text); } catch { /* noop */ } }
     let webCtx = '';
     if (window.WEB) { try { webCtx = WEB.systemPrompt(); } catch { /* noop */ } }
-    const sysAll = [sys, webCtx, docCtx, memCtx].filter(Boolean).join('\n\n');
+    let toolCtx = '';
+    if (window.TOOLS && TOOLS.enabled()) {
+      try { await TOOLS.refresh(); toolCtx = TOOLS.systemPrompt(); } catch { /* noop */ }
+    }
+    const sysAll = [sys, webCtx, toolCtx, docCtx, memCtx].filter(Boolean).join('\n\n');
 
     // the loop's working transcript: state.messages plus any tool-call rounds.
     // tool exchanges live ONLY here (not state.messages) so the visible/saved
     // transcript stays clean -- just the user turn and the final answer.
     const webOn = !!(window.WEB && WEB.enabled());
+    const toolsOn = !!(window.TOOLS && TOOLS.enabled());
     const work = state.messages.slice();
     const buildPayload = () => ({
       backend, model,
@@ -562,7 +570,15 @@
     // wrappers stay silent -- so voice tracks the typewriter here too.
     if (window.VOICE) { try { window.VOICE.resetStream(); } catch { /* noop */ } }
 
-    let curOut = null, rounds = 0;
+    let curOut = null, rounds = 0, toolCalls = 0;
+    // agent-loop stability: stop on repeated identical failures / env errors /
+    // identical repeated calls
+    let lastToolErr = null, sameErrCount = 0, lastCallSig = null;
+    const stopAgent = (out, msg) => {           // safe exit: show msg, no more loops
+      if (out) out.body.textContent = msg;
+      state.messages.push({ role: 'assistant', content: msg });
+      EYE.setState('idle');
+    };
     const allSources = [];      // pages the web tools drew on -> "Sources" footer
     try {
       for (;;) {
@@ -573,7 +589,7 @@
         const glancer = setInterval(() => EYE.glance(out.div, 700), 2400);
         let acc = '';
         try {
-          acc = await streamInto(buildPayload(), out, webOn ? 'guarded' : 'live');
+          acc = await streamInto(buildPayload(), out, (webOn || toolsOn) ? 'guarded' : 'live');
         } finally {
           clearInterval(glancer);
           out.div.classList.remove('streaming');
@@ -633,6 +649,101 @@
           continue;
         }
 
+        // strict tool-call detection: a valid call, a malformed attempt, or null
+        // (plain prose = final answer). Mirrors the web branch structure.
+        const tcall = toolsOn ? TOOLS.detect(acc) : null;
+        if (tcall) {
+          // LOOP CONTROL: hard cap of MAX_TOOL_CALLS per user turn
+          if (toolCalls >= MAX_TOOL_CALLS) {
+            stopAgent(out, 'Execution stopped: tool call limit reached (' + MAX_TOOL_CALLS + ').');
+            break;
+          }
+          toolCalls++;
+          work.push({ role: 'assistant', content: acc });
+
+          // STRICT FORMAT: malformed call -> structured error back, no execution
+          if (tcall.malformed) {
+            out.body.textContent = '';
+            webChip(out.div, '⚠ invalid tool call', 'rejected');
+            const key = 'malformed:' + TOOLS.errKey(tcall.error);
+            if (key === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = key; }
+            if (sameErrCount >= 2) { stopAgent(out, 'Execution stopped: repeated failure detected.'); break; }
+            work.push({ role: 'user', content: '[TOOL RESULT]\n'
+              + JSON.stringify({ success: false, output: null, error: tcall.error }) });
+            EYE.setState('thinking');
+            continue;
+          }
+
+          // DEDUP: identical tool + args two times in a row -> stop
+          const sig = tcall.name + ':' + JSON.stringify(tcall.args);
+          if (sig === lastCallSig) {
+            stopAgent(out, 'Execution stopped: repeated identical tool call.');
+            break;
+          }
+          lastCallSig = sig;
+
+          // "confirm" approval: a write/exec tool needs an explicit yes
+          if (TOOLS.needsConfirm(tcall)) {
+            out.body.textContent = '';
+            const choice = await chatQuestion(
+              'The model wants to run a tool: ' + tcall.label + '. Allow it?',
+              [{ value: 'yes', label: '✅ Run it' }, { value: 'no', label: '✋ Skip' }]);
+            if (choice !== 'yes') {
+              webChip(out.div, tcall.label, 'skipped by you');
+              work.push({ role: 'user', content: '[TOOL RESULT]\n' + JSON.stringify({
+                success: false, output: null,
+                error: 'the user declined to run this tool; continue without it or explain what you need',
+              }) });
+              EYE.setState('thinking');
+              continue;
+            }
+          }
+
+          // USER FEEDBACK + run the tool
+          out.body.textContent = '';
+          const fill = webChip(out.div, tcall.label, 'running…');
+          EYE.setState('refreshing', '◉ AEYE IS USING TOOLS…');
+          const res = await TOOLS.run(tcall);
+          fill(res.display);
+
+          if (!res.ok) {
+            // ENVIRONMENT/DEPENDENCY error -> unfixable with file tools, stop
+            if (TOOLS.isEnvError(res.error)) {
+              stopAgent(out, 'Dependency or environment issue. Cannot be resolved with file tools.');
+              break;
+            }
+            // REPEAT FAILURE -- same normalized error twice in a row -> stop
+            const key = TOOLS.errKey(res.error);
+            if (key && key === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = key; }
+            if (sameErrCount >= 2) {
+              stopAgent(out, 'Execution stopped: repeated failure detected.');
+              break;
+            }
+          } else {
+            lastToolErr = null; sameErrCount = 0;   // a success breaks the streak
+          }
+
+          work.push({ role: 'user', content: res.message });
+          EYE.setState('thinking');
+          continue;
+        }
+
+        // the model fabricated our "[TOOL RESULT]" wrapper instead of emitting a
+        // real tool call -- don't pass the made-up result off as an answer; correct
+        // it and retry (mirrors the web faked-results guard).
+        if (toolsOn && TOOLS.looksFaked(acc) && toolRounds < MAX_TOOL_ROUNDS) {
+          toolRounds++;
+          out.body.textContent = '';
+          webChip(out.div, '⚙ tool', 'model faked a result — retrying');
+          work.push({ role: 'assistant', content: acc });
+          work.push({ role: 'user', content: '[SYSTEM] Do NOT write "[TOOL RESULT]" '
+            + 'yourself or claim a tool ran. To actually use a tool, reply with ONLY '
+            + '<tool_call>{"name":"...","args":{...}}</tool_call> and nothing else. If no '
+            + 'tool is needed, answer plainly with no "[TOOL RESULT]" text.' });
+          EYE.setState('thinking');
+          continue;
+        }
+
         // final answer (tool budget spent, web off, or no tool asked). With web
         // on it was already streamed live in guarded mode above -- no need to
         // re-feed the whole thing at the end.
@@ -643,6 +754,15 @@
         if (curOut) linkify(curOut.body, acc);
         if (allSources.length && curOut) sourcesFooter(curOut.div, allSources);
         break;
+      }
+      // FINAL RESPONSE GUARANTEE: a turn never ends without an assistant message
+      const lastMsg = state.messages[state.messages.length - 1];
+      if (!lastMsg || lastMsg.role !== 'assistant') {
+        const summary = toolCalls
+          ? 'Finished after ' + toolCalls + ' tool call' + (toolCalls === 1 ? '' : 's') + '.'
+          : 'Done.';
+        if (curOut && !curOut.body.textContent) curOut.body.textContent = summary;
+        state.messages.push({ role: 'assistant', content: summary });
       }
       EYE.setState('idle');
       if (window.VOICE) { try { window.VOICE.flush(); } catch { /* noop */ } }

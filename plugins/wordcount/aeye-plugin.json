@@ -1,0 +1,10 @@
+{
+  "name": "Word Count (sample tool)",
+  "trigger": "word_count",
+  "type": "tool",
+  "access": "read",
+  "description": "Count the words in a piece of text. Sample custom LLM tool.",
+  "args": [{"name": "text", "type": "string", "required": true, "description": "the text to count words in"}],
+  "command": ["python", "wc.py", "{text}"],
+  "timeout": 15
+}

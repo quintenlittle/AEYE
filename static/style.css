@@ -121,6 +121,13 @@ header {
   background: var(--panel);
 }
 #badges.hidden { display: none; }        /* sysmon row hidden for now (see index.html) */
+
+/* LLM tool-access config (Manage > Plugins) */
+.tool-cfg-grid { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; }
+.tool-cfg-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--sclera); }
+.tool-root-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin: 8px 0; }
+.tool-root-row label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--sclera); flex: 1; min-width: 240px; }
+.tool-root-row input { width: 100%; }
 #status-chips {
   display: flex;
   align-items: center;

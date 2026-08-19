@@ -618,6 +618,39 @@
   $('pn-cancel').addEventListener('click', () => $('plug-new-form').classList.add('hidden'));
   $('plug-editor-file').addEventListener('change', (e) => loadFile(e.target.value));
 
+  // ---- LLM tool access (agentic) config ------------------------------------
+  // The TOOLS module (tools.js) owns the state + backend sync; this just wires
+  // the Manage>Plugins controls to it and reflects the resolved workspace root.
+  async function loadToolCfg() {
+    if (!window.TOOLS) return;
+    const { cfg } = await TOOLS.refresh();
+    if ($('tool-enabled')) $('tool-enabled').checked = !!cfg.enabled;
+    if ($('tool-mode')) $('tool-mode').value = cfg.mode || 'read';
+    if ($('tool-approval')) $('tool-approval').value = cfg.approval || 'auto';
+    if ($('tool-root') && document.activeElement !== $('tool-root'))
+      $('tool-root').value = cfg.root || '';
+  }
+  const setToolStatus = (m, err) => {
+    const e = $('tool-status'); if (e) { e.textContent = m || ''; e.className = 'mini-status' + (err ? ' err' : ''); }
+  };
+  async function pushToolCfg(patch, msg) {
+    if (!window.TOOLS) return;
+    try { await TOOLS.setConfig(patch); setToolStatus(msg || 'saved'); await loadToolCfg(); }
+    catch { setToolStatus('failed', true); }
+  }
+  if ($('tool-enabled'))
+    $('tool-enabled').addEventListener('change', (e) =>
+      pushToolCfg({ enabled: e.target.checked }, e.target.checked ? 'tool access ON' : 'tool access off'));
+  if ($('tool-mode'))
+    $('tool-mode').addEventListener('change', (e) => pushToolCfg({ mode: e.target.value }, 'mode: ' + e.target.value));
+  if ($('tool-approval'))
+    $('tool-approval').addEventListener('change', (e) => pushToolCfg({ approval: e.target.value }, 'approval: ' + e.target.value));
+  if ($('tool-root-save'))
+    $('tool-root-save').addEventListener('click', () => pushToolCfg({ root: ($('tool-root').value || '').trim() }, 'workspace set'));
+  // refresh the config panel whenever the plugins tab is opened
+  document.querySelector('[data-tab="tab-plugins"]').addEventListener('click', loadToolCfg);
+  loadToolCfg();
+
   // ---- shared api ----------------------------------------------------------
 
   window.PLUGINS = { match, run, reload: () => load(true), sessionActive, sessionInput };

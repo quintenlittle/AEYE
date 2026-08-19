@@ -30,6 +30,7 @@ datas = [
     (_res("aeye-4chan-relay.py"), "."),   # board-ticker relay (started in-process at boot)
     (_res("plugins", "echo"), os.path.join("plugins", "echo")),
     (_res("plugins", "rss"), os.path.join("plugins", "rss")),
+    (_res("plugins", "wordcount"), os.path.join("plugins", "wordcount")),  # sample type:tool
 ]
 binaries = []
 hiddenimports = []
