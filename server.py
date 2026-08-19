@@ -2795,7 +2795,8 @@ def _agent_default_root() -> str:
 
 
 _agent_cfg = {"enabled": False, "mode": "read", "approval": "auto",
-              "root": _agent_default_root(), "debug": False, "dry_run": False}
+              "root": _agent_default_root(), "debug": False, "dry_run": False,
+              "force_agent": False}   # A/B: force full-plan AGENT path (never weakens safety)
 
 
 def _tool_log(kind: str, **kw) -> None:
@@ -2814,7 +2815,7 @@ def _agent_cfg_load():
     try:
         with open(_AGENT_CFG_FILE, encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("enabled", "mode", "approval", "root", "debug", "dry_run"):
+        for k in ("enabled", "mode", "approval", "root", "debug", "dry_run", "force_agent"):
             if k in d:
                 _agent_cfg[k] = d[k]
     except Exception:
@@ -2839,6 +2840,20 @@ def _agent_root() -> str:
     except OSError:
         pass
     return root
+
+
+# Phase 1 -- startup readiness: prepare the saved root now so tool access is
+# ready without a manual button press. Never silently switches to another folder;
+# an invalid root simply leaves tools blocked (see root_valid in the config).
+try:
+    if _agent_cfg.get("root"):
+        _root0 = _agent_root()
+        if _agent_cfg.get("debug"):
+            print("AEYE [AGENT STARTUP] enabled={} mode={} root={} valid={}".format(
+                _agent_cfg.get("enabled"), _agent_cfg.get("mode"), _root0,
+                os.path.isdir(_root0)), flush=True)
+except Exception:
+    pass
 
 
 def _confine(p: str) -> str:
@@ -3260,6 +3275,7 @@ class AgentCfgReq(BaseModel):
     root: Optional[str] = None
     debug: Optional[bool] = None          # dev-only tool lifecycle logging
     dry_run: Optional[bool] = None        # simulate mutations (no filesystem writes)
+    force_agent: Optional[bool] = None    # A/B: always take the full-plan AGENT path
 
 
 class ToolRunReq(BaseModel):
@@ -3267,9 +3283,24 @@ class ToolRunReq(BaseModel):
     args: dict = {}
 
 
+def _root_valid() -> bool:
+    """Is the configured workspace root a real, accessible directory?"""
+    try:
+        return os.path.isdir(_agent_root())
+    except Exception:
+        return False
+
+
+def _cfg_view() -> dict:
+    """Config + resolved/validated root -- so the UI shows a clear ready/blocked
+    state without a button click (Phase 1: startup readiness)."""
+    return {"ok": True, "config": dict(_agent_cfg),
+            "root_resolved": _agent_root(), "root_valid": _root_valid()}
+
+
 @app.get("/api/plugins/tool/config")
 def agent_tool_config_get():
-    return {"ok": True, "config": dict(_agent_cfg), "root_resolved": _agent_root()}
+    return _cfg_view()
 
 
 @app.post("/api/plugins/tool/config")
@@ -3282,13 +3313,18 @@ def agent_tool_config_set(req: AgentCfgReq):
         if req.approval in ("auto", "confirm"):
             _agent_cfg["approval"] = req.approval
         if req.root is not None and str(req.root).strip():
-            _agent_cfg["root"] = str(req.root).strip()
+            newroot = str(req.root).strip()
+            if newroot != _agent_cfg.get("root"):
+                _diff_ok.clear()          # Phase 15: stale diff/hash state must not survive a root change
+            _agent_cfg["root"] = newroot
         if req.debug is not None:
             _agent_cfg["debug"] = bool(req.debug)
         if req.dry_run is not None:
             _agent_cfg["dry_run"] = bool(req.dry_run)
+        if req.force_agent is not None:
+            _agent_cfg["force_agent"] = bool(req.force_agent)
         _agent_cfg_save()
-    return {"ok": True, "config": dict(_agent_cfg), "root_resolved": _agent_root()}
+    return _cfg_view()
 
 
 @app.get("/api/plugins/tools")
@@ -3298,8 +3334,9 @@ def agent_tools_list():
     reg = _tool_registry()
     for t in reg:
         t["allowed"] = _mode_allows(t.get("access", "exec"))
-    return {"ok": True, "tools": reg, "config": dict(_agent_cfg),
-            "root_resolved": _agent_root()}
+    v = _cfg_view()
+    v["tools"] = reg
+    return v
 
 
 @app.post("/api/plugins/tool/run")

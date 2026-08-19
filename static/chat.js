@@ -28,6 +28,10 @@
   // preferred out-of-the-box model on a machine with no saved choice yet
   // (the installer pulls it automatically, so fresh machines can talk at once)
   const DEFAULT_MODEL = 'ollama::dolphin-mistral:latest';
+  // Performance-test profile (separate, reversible; see PERF.restore). Default ON
+  // for this testing build; the user's saved model/ticker/eye choices always win.
+  const PERF_MODEL = 'ollama::RedDragon-Qwythos-9B:latest';
+  const perfProfile = () => localStorage.getItem('aeye-perf-profile') !== '0';
 
   // ---- helpers -----------------------------------------------------------
 
@@ -346,6 +350,7 @@
     // house default (if installed), then the auto-reloaded HF model.
     if (usable(stored)) modelSel.value = stored;
     else if (usable(prev)) modelSel.value = prev;
+    else if (perfProfile() && usable(PERF_MODEL)) modelSel.value = PERF_MODEL;  // perf-test default (if installed)
     else if (usable(DEFAULT_MODEL)) modelSel.value = DEFAULT_MODEL;
     else if (!stored && (hf.state === 'ready' || hf.state === 'loading'))
       modelSel.value = 'hf::' + hf.model_id;
@@ -544,9 +549,17 @@
     if (window.DOCS) { try { docCtx = await DOCS.contextFor(text); } catch { /* noop */ } }
     let webCtx = '';
     if (window.WEB) { try { webCtx = WEB.systemPrompt(); } catch { /* noop */ } }
+    // PHASE 3 -- ROUTER: pick an execution mode (SIMPLE / STANDARD / AGENT). Only
+    // selects the prompt + tool registry we send; the loop enforces safety
+    // regardless of this choice. Conservative: AGENT on any danger/multi signal.
+    let execMode = 'simple';
     let toolCtx = '';
     if (window.TOOLS && TOOLS.enabled()) {
-      try { await TOOLS.refresh(); toolCtx = TOOLS.systemPrompt(); } catch { /* noop */ }
+      try {
+        await TOOLS.refresh();
+        execMode = TOOLS.classifyMode(text);
+        toolCtx = TOOLS.systemPrompt(execMode);   // '' for simple
+      } catch { /* noop */ }
     }
     const sysAll = [sys, webCtx, toolCtx, docCtx, memCtx].filter(Boolean).join('\n\n');
 
@@ -554,7 +567,7 @@
     // tool exchanges live ONLY here (not state.messages) so the visible/saved
     // transcript stays clean -- just the user turn and the final answer.
     const webOn = !!(window.WEB && WEB.enabled());
-    const toolsOn = !!(window.TOOLS && TOOLS.enabled());
+    const toolsOn = !!(window.TOOLS && TOOLS.enabled()) && execMode !== 'simple';
     const work = state.messages.slice();
     const buildPayload = () => ({
       backend, model,
@@ -577,6 +590,39 @@
     // PHASE 4/13 -- context state (internal; drives planning + progress)
     const agent = { plan: [], step: 0, planCount: 0, touched: new Set(),
                     completed: [], failed: [], lastResult: null, opsPerFile: {} };
+    // PHASE 2 -- perf instrumentation (debug-only)
+    const perf = { t0: performance.now(), model_ms: 0, tool_ms: 0, ctxChars: 0, planning_ms: 0 };
+    // operations that must ALWAYS go through the full AGENT plan path
+    const DANGEROUS = new Set(['delete_file', 'move_file', 'run_command', 'pip_install']);
+
+    // PHASE 5 -- controller-owned STANDARD write: the model decided the content;
+    // the controller runs the required preview -> hash-gate -> write -> validate
+    // sequence itself (all backend-authoritative) in ONE round, no extra model
+    // generations. Returns the TOOLS.run-shaped result.
+    async function controllerWrite(args) {
+      const path = String(args.path || '');
+      const content = args.content;
+      const t = performance.now();
+      // 1) preview: records the file hash + reports whether it exists (gate prep)
+      const pv = await TOOLS.run({ name: 'preview_diff', args: { path, new_content: content } });
+      if (!pv.ok) { perf.tool_ms += performance.now() - t; return pv; }
+      // 2) write: the diff-gate + hash check now pass for this exact content
+      const wr = await TOOLS.run({ name: 'write_file', args: { path, content } });
+      perf.tool_ms += performance.now() - t;
+      if (!wr.ok) return wr;
+      let extra = '';
+      // 3) targeted validation (Phase 14): only the file we just changed
+      if (/\.(py|js|mjs|cjs|ts|jsx)$/i.test(path)) {
+        const tc = performance.now();
+        const ck = await TOOLS.run({ name: 'check_code', args: { path } });
+        perf.tool_ms += performance.now() - tc;
+        extra = ck.ok ? ' Syntax OK.' : (' Syntax check FAILED: ' + ck.error);
+      }
+      const output = String(wr.output || 'Write successful') + extra;
+      return { ok: true, error: '',
+        message: '[TOOL RESULT]\n' + JSON.stringify({ success: true, output, error: null }),
+        display: output };
+    }
     const stopAgent = (out, msg) => {           // safe exit: show msg, no more loops
       if (out) out.body.textContent = msg;
       state.messages.push({ role: 'assistant', content: msg });
@@ -591,11 +637,14 @@
         // while speaking, the eye occasionally glances down at its own words
         const glancer = setInterval(() => EYE.glance(out.div, 700), 2400);
         let acc = '';
+        const _m0 = performance.now();
         try {
           acc = await streamInto(buildPayload(), out, (webOn || toolsOn) ? 'guarded' : 'live');
         } finally {
           clearInterval(glancer);
           out.div.classList.remove('streaming');
+          perf.model_ms += performance.now() - _m0;   // PHASE 2: model round latency
+          perf.rounds = (perf.rounds || 0) + 1;
         }
 
         // did the model ask for a web tool? (only when the toggle is on)
@@ -714,17 +763,53 @@
           lastCallSig = sig;
 
           const mutating = TOOLS.isMutator(tcall.name);
+          const dangerous = DANGEROUS.has(tcall.name);
+          const fp = tcall.args && (tcall.args.path || tcall.args.path_to || tcall.args.path_from);
+          // a mutation to a 2nd distinct file this turn = multi-file -> needs AGENT
+          const secondFile = !!fp && !(fp in agent.opsPerFile) && Object.keys(agent.opsPerFile).length >= 1;
+          // PHASE 1/3/4 -- a plan is required for dangerous ops, AGENT-classified
+          // turns, or multi-file work; simple single-file writes are NOT gated here
+          const needPlan = mutating && (dangerous || execMode === 'agent' || secondFile);
 
-          // PHASE 1 -- HARD plan enforcement: no mutation without a valid plan
-          if (mutating && !agent.plan.length) {
+          // PHASE 1 -- HARD plan enforcement (mode-aware). No auto-continue.
+          if (needPlan && !agent.plan.length) {
             out.body.textContent = '';
             webChip(out.div, '🧠 plan required', 'rejected');
             const key = 'noplan';
             if (key === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = key; }
             if (sameErrCount >= 2) { stopAgent(out, 'Execution stopped: repeated failure detected.'); break; }
-            work.push({ role: 'user', content: '[TOOL RESULT]\n' + JSON.stringify({
-              success: false, output: null, error: 'Plan required before file operations' }) });
+            const why = dangerous ? ('"' + tcall.name + '" is a guarded operation')
+              : (secondFile ? 'changing more than one file' : 'this task');
+            work.push({ role: 'user', content: '[TOOL RESULT]\n'
+              + JSON.stringify({ success: false, output: null, error: 'Plan required before file operations' })
+              + '\n[SYSTEM] ' + why + ' requires a plan first. Reply with a [PLAN] — numbered, ≤5 steps, one '
+              + 'short sentence each, name file paths, NO tool call — then execute one step per reply.' });
             EYE.setState('thinking', '◉ AEYE IS PLANNING…');
+            continue;
+          }
+
+          // PHASE 5 -- controller-owned STANDARD fast path for a single-file write:
+          // the model already decided the content; run preview->write->validate here
+          // (no [PLAN], no extra model rounds), safety checks still backend-enforced.
+          if (!agent.plan.length && execMode !== 'agent' && tcall.name === 'write_file' && !needPlan) {
+            if (fp) agent.opsPerFile[fp] = (agent.opsPerFile[fp] || 0) + 1;
+            if (fp && agent.opsPerFile[fp] > 3) { stopAgent(out, 'Redundant operation detected on ' + fp + '.'); break; }
+            out.body.textContent = '';
+            const fill = webChip(out.div, tcall.label, 'editing…');
+            EYE.setState('refreshing', '◉ AEYE IS EDITING A FILE…');
+            const res = await controllerWrite(tcall.args);
+            fill(res.display);
+            agent.lastResult = res;
+            if (fp) agent.touched.add(fp);
+            if (!res.ok) {
+              if (TOOLS.isEnvError(res.error)) { stopAgent(out, 'Dependency or environment issue. Cannot be resolved with file tools.'); break; }
+              const k = TOOLS.errKey(res.error);
+              if (k && k === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = k; }
+              if (sameErrCount >= 2) { stopAgent(out, 'Execution stopped: repeated failure detected.'); break; }
+            } else { lastToolErr = null; sameErrCount = 0; }
+            perf.ctxChars += res.message.length;
+            work.push({ role: 'user', content: res.message });
+            EYE.setState('thinking');
             continue;
           }
 
@@ -783,7 +868,10 @@
             : '◉ AEYE IS USING TOOLS…');
           // track touched files (Phase 3/4) from any file-tool path argument
           if (tcall.args && tcall.args.path) agent.touched.add(String(tcall.args.path));
+          const _t0 = performance.now();
           const res = await TOOLS.run(tcall);
+          perf.tool_ms += performance.now() - _t0;   // PHASE 2: tool exec latency
+          perf.ctxChars += (res.message || '').length;
           fill(res.display);
           agent.lastResult = res;
 
@@ -861,6 +949,21 @@
       EYE.setState('error');
       setTimeout(() => !state.busy && EYE.setState('idle'), 4000);
     } finally {
+      // PHASE 2/16 -- perf summary (DEBUG ONLY; nothing persisted when off)
+      try {
+        if (window.TOOLS && TOOLS.enabled() && TOOLS.config().debug) {
+          const total = Math.round(performance.now() - perf.t0);
+          const modeLabel = (execMode || 'simple').toUpperCase()
+            + (TOOLS.forceAgent() ? ' (forced)' : '');
+          console.log('[AGENT PERF]\nmode=' + modeLabel
+            + '\nmodel_rounds=' + (perf.rounds || 0)
+            + '\ntool_calls=' + toolCalls
+            + '\nmodel_ms=' + Math.round(perf.model_ms)
+            + '\ntool_ms=' + Math.round(perf.tool_ms)
+            + '\ntool_result_chars=' + perf.ctxChars
+            + '\ntotal_ms=' + total);
+        }
+      } catch { /* noop */ }
       state.busy = false;
       $('send').disabled = false;
       input.focus();
@@ -1208,9 +1311,12 @@
     if (hideEye && window.EYE && EYE.setHidden) {
       const EYE_AUTOHIDE_W = 1080;   // viewport width below which the eye auto-hides
       const manual = () => localStorage.getItem('aeye-hide-eye') === '1';
+      const manualSet = () => localStorage.getItem('aeye-hide-eye') !== null;
       const tooNarrow = () => window.innerWidth < EYE_AUTOHIDE_W;
-      const apply = () => EYE.setHidden(manual() || tooNarrow());
-      hideEye.checked = manual();
+      // perf-test profile hides the eye at boot UNTIL the user picks (either way)
+      const perfHide = () => perfProfile() && !manualSet();
+      const apply = () => EYE.setHidden(manual() || perfHide() || tooNarrow());
+      hideEye.checked = manual() || perfHide();
       apply();
       hideEye.addEventListener('change', () => {
         localStorage.setItem('aeye-hide-eye', hideEye.checked ? '1' : '0');

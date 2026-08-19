@@ -492,6 +492,11 @@ if (!localStorage.getItem('aeye-default-v3')) {
               <span class="mini-status" id="tool-status" style="min-height:0"></span>
             </div>
             <label class="chk"><input id="tool-dryrun" type="checkbox"> Dry run (simulate all file changes &mdash; nothing is written)</label>
+            <label class="chk"><input id="tool-forceagent" type="checkbox"> Force full agent mode (A/B testing &mdash; always plan; disables fast routing)</label>
+            <div class="tool-root-row" style="margin-top:8px">
+              <span class="fieldset-hint" style="flex:1;margin:0">Performance-test profile is <b id="perf-state">ON</b> (tickers &amp; eye off at startup, RedDragon default). Your saved model/ticker/eye choices always win.</span>
+              <button id="perf-restore" type="button" class="ghost">Restore Normal Defaults</button>
+            </div>
             <div class="fieldset-hint">
               <b>Read Only</b> = read/list files only &middot; <b>Read + Write</b> = also create/overwrite files &middot;
               <b>Autonomous</b> = also run command tools. All file access is confined to the workspace folder &mdash;
@@ -868,7 +873,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 
 <script src="/static/eye.js?v=2"></script>
 <script src="/static/game.js?v=2"></script>
-<script src="/static/chat.js?v=9"></script>
+<script src="/static/chat.js?v=10"></script>
 <script src="/static/library.js?v=2"></script>
 <script src="/static/imagine.js?v=2"></script>
 <script src="/static/dream.js?v=2"></script>
@@ -878,13 +883,13 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/memory.js?v=2"></script>
 <script src="/static/docs.js?v=2"></script>
 <script src="/static/web.js?v=2"></script>
-<script src="/static/ticker.js?v=5"></script>
+<script src="/static/ticker.js?v=6"></script>
 <script src="/static/boards.js?v=6"></script>
 <script src="/static/sidebar.js?v=4"></script>
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
-<script src="/static/plugins.js?v=6"></script>
-<script src="/static/tools.js?v=8"></script>
+<script src="/static/plugins.js?v=7"></script>
+<script src="/static/tools.js?v=9"></script>
 <script src="/static/p2p.js?v=7"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>

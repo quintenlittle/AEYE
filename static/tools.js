@@ -46,50 +46,87 @@
     return (t.args || []).map((a) =>
       a.name + (a.required === false ? '?' : '')).join(', ');
   }
-  function systemPrompt() {
-    if (!enabled()) return '';
+  const forceAgent = () => !!cfg.force_agent;
+
+  // STANDARD-mode tool subset (bounded single-file work). preview_diff is
+  // CONTROLLER-owned in STANDARD so it is intentionally not advertised here.
+  const STANDARD_TOOLS = new Set(['read_file', 'list_files', 'write_file', 'check_code']);
+
+  // tools advertised to the model for a given execution mode (Phase 7 filtering)
+  function toolsForMode(mode) {
     const av = allowed();
+    if (mode === 'simple') return [];
+    if (mode === 'standard') return av.filter((t) => STANDARD_TOOLS.has(t.name));
+    return av;                              // agent -> full permitted set
+  }
+
+  // conservative router (Phase 3/4): picks which PROMPT + tools to send. Safety
+  // is NOT decided here -- the loop enforces plans/limits regardless. SIMPLE only
+  // when clearly no tools; AGENT on any danger/multi signal; else STANDARD.
+  const TOOLY = /\b(file|files|read|write|create|edit|modify|change|update|append|save|list|folder|directory|check|syntax|preview|diff|workspace|script|code|\.(py|js|ts|jsx|json|md|txt|csv|html|css|ya?ml))\b/i;
+  const DANGER = /\b(delete|remove|rm\b|move|rename|run|execute|install|pip|package|dependency|npm|terminal|command|venv|environment|virtualenv)\b/i;
+  const MULTI = /\b(files|multiple|several|each|every|all\s+the|both|project|across|three|two\s+files|then|after that|and then|refactor)\b/i;
+  function classifyMode(text) {
+    if (!enabled()) return 'simple';
+    if (forceAgent()) return 'agent';
+    const t = String(text || '');
+    if (!TOOLY.test(t) && !DANGER.test(t)) return 'simple';
+    if (DANGER.test(t) || MULTI.test(t)) return 'agent';
+    return 'standard';
+  }
+
+  const toolLines = (av) => av.map((t) => {
+    const args = (t.args || []).map((a) =>
+      '    - ' + a.name + ' (' + a.type + (a.required === false ? ', optional' : '') + '): '
+      + (a.description || '')).join('\n');
+    return '- ' + t.name + '(' + argSig(t) + '): ' + (t.description || '')
+      + (args ? '\n' + args : '');
+  }).join('\n');
+
+  // CORE rules -- always sent when tools are enabled (kept compact)
+  const CORE = [
+    'You can use TOOLS on files in the user’s workspace. Call ONE tool per reply as a single raw JSON',
+    'object and nothing else: {"tool":"name","args":{...}} (a ```json fenced block is also accepted; no',
+    'XML, no other shape — malformed JSON is rejected). You then get a JSON [TOOL RESULT]',
+    '{"success":..,"output":..,"error":..} which is AUTHORITATIVE — never restate, reformat or invent a',
+    'result. Paths are relative to the workspace; anything outside it is rejected. When finished, reply in',
+    'plain prose with NO JSON.',
+  ];
+
+  // modular system prompt by execution mode (Phase 6)
+  function systemPrompt(mode) {
+    if (!enabled() || mode === 'simple') return '';
+    const av = toolsForMode(mode);
     if (!av.length) return '';
-    const lines = av.map((t) => {
-      const args = (t.args || []).map((a) =>
-        '    - ' + a.name + ' (' + a.type + (a.required === false ? ', optional' : '') + '): '
-        + (a.description || '')).join('\n');
-      return '- ' + t.name + '(' + argSig(t) + '): ' + (t.description || '')
-        + (args ? '\n' + args : '');
-    }).join('\n');
-    return [
-      'You can use TOOLS to read and write files inside the user’s workspace.',
-      'To call a tool, reply with ONLY a single raw JSON object in EXACTLY this format and nothing else:',
-      '{"tool": "tool_name", "args": {"key": "value"}}',
-      '(A ```json fenced block is also accepted.) Do NOT use XML, <tool_call> tags, function-call syntax,',
-      'or any other shape — only that exact JSON object. Malformed JSON will be rejected.',
-      'You will then receive a JSON [TOOL RESULT] of the form {"success":true,"output":"…","error":null}',
-      '(or {"success":false,"output":null,"error":"…"}). Read it, then continue or give your final answer.',
-      'Rules: at most ONE tool call per reply; only call a tool when it genuinely helps; when you already',
-      'have the answer, reply in plain prose with NO JSON. File paths are relative to the workspace.',
-      'NEVER write "[TOOL RESULT]" or a result yourself — that comes only from the system after a real call.',
-      'SCOPE: you may ONLY use the tools listed below. You cannot install packages, change the environment,',
-      'run shell commands, or fix dependencies — no such tools exist. If a task needs an uninstalled',
-      'dependency, say so plainly and STOP; do not retry.',
+    if (mode === 'standard') {
+      return CORE.concat([
+        '',
+        'This is a simple, bounded single-file task — no [PLAN] needed. To create OR edit a file, call',
+        'write_file with the FULL new content; the system automatically previews the diff, verifies file',
+        'integrity, writes, and syntax-checks for you in one step. If you need the current contents before',
+        'deciding the change, call read_file first. Do not call preview_diff yourself.',
+        '',
+        'Available tools:',
+        toolLines(av),
+      ]).join('\n');
+    }
+    // AGENT mode
+    return CORE.concat([
       '',
-      'PLANNING (REQUIRED before ANY write/move/delete/create/run/install): FIRST reply with a plain-text',
-      'plan and NO tool call, in EXACTLY this form — numbered 1..N, at most 5 steps, no duplicate steps,',
-      'and every file step must name its file path:',
+      'PLAN FIRST (required before any write/move/delete/create/run/install): reply with a plain-text plan',
+      'and NO tool call — numbered 1..N, at most 5 steps, no duplicates, one short sentence per step, and',
+      'every file step names its path:',
       '[PLAN]',
-      '1. preview_diff notes.txt',
-      '2. write notes.txt',
-      'ONE step = ONE tool call. After the plan, execute one step per reply. Read-only tools',
-      '(read_file, list_files, preview_diff, check_code) may be used any time.',
-      'EDITING EXISTING FILES: make preview_diff its OWN step BEFORE the write step — call',
-      'preview_diff(path,new_content), review the diff, then write_file with the same path (the file must',
-      'be unchanged since the preview). Creating a brand-new file needs no diff.',
-      'DELETES: delete_file must be its own single-purpose plan step.',
-      'TOOL RESULTS ARE AUTHORITATIVE: never restate, reformat or reinterpret a [TOOL RESULT]; just use it',
-      'to decide your next action or final answer.',
+      '1. Preview changes to app.py.',
+      '2. Write app.py.',
+      'ONE step = ONE tool call. Never combine [PLAN] text and a tool JSON in one reply. Execute one step',
+      'per reply. To edit an existing file: preview_diff(path,new_content) as its own step, then write_file',
+      'with the same path (unchanged since the preview). delete_file must be its own single-purpose step.',
+      'Stop as soon as the goal is achieved and any required validation passed.',
       '',
       'Available tools:',
-      lines,
-    ].join('\n');
+      toolLines(av),
+    ]).join('\n');
   }
 
   // ---- STRICT tool-call detection (JSON ONLY) -------------------------------
@@ -273,9 +310,10 @@
     return null;
   }
 
-  window.TOOLS = { enabled, mode, approval, refresh, setConfig, systemPrompt,
-    detect, parsePlan, stepMatches, isMutator, run, needsConfirm, looksFaked,
-    isEnvError, errKey, forbidden, list: () => tools, config: () => cfg };
+  window.TOOLS = { enabled, mode, approval, forceAgent, refresh, setConfig,
+    systemPrompt, classifyMode, toolsForMode, detect, parsePlan, stepMatches,
+    isMutator, run, needsConfirm, looksFaked, isEnvError, errKey, forbidden,
+    list: () => tools, config: () => cfg };
 
   if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', () => { refresh(); });

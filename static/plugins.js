@@ -628,6 +628,7 @@
     if ($('tool-mode')) $('tool-mode').value = cfg.mode || 'read';
     if ($('tool-approval')) $('tool-approval').value = cfg.approval || 'auto';
     if ($('tool-dryrun')) $('tool-dryrun').checked = !!cfg.dry_run;
+    if ($('tool-forceagent')) $('tool-forceagent').checked = !!cfg.force_agent;
     if ($('tool-root') && document.activeElement !== $('tool-root'))
       $('tool-root').value = cfg.root || '';
   }
@@ -648,6 +649,27 @@
     $('tool-approval').addEventListener('change', (e) => pushToolCfg({ approval: e.target.value }, 'approval: ' + e.target.value));
   if ($('tool-dryrun'))
     $('tool-dryrun').addEventListener('change', (e) => pushToolCfg({ dry_run: e.target.checked }, e.target.checked ? 'dry run ON' : 'dry run off'));
+  if ($('tool-forceagent'))
+    $('tool-forceagent').addEventListener('change', (e) => pushToolCfg({ force_agent: e.target.checked }, e.target.checked ? 'force agent ON' : 'force agent off'));
+  // Performance-test profile: reversible startup defaults (tickers/eye/model).
+  // "Restore Normal Defaults" turns the profile OFF without touching the user's
+  // own saved preferences; a reload then applies normal app defaults.
+  (function perfProfileUI() {
+    const st = $('perf-state'), btn = $('perf-restore');
+    if (!st || !btn) return;
+    const on = () => localStorage.getItem('aeye-perf-profile') !== '0';
+    const paint = () => {
+      st.textContent = on() ? 'ON' : 'OFF';
+      btn.textContent = on() ? 'Restore Normal Defaults' : 'Re-enable Test Profile';
+    };
+    paint();
+    btn.addEventListener('click', () => {
+      localStorage.setItem('aeye-perf-profile', on() ? '0' : '1');
+      paint();
+      setToolStatus('profile ' + (on() ? 'ON' : 'OFF') + ' — reloading…');
+      setTimeout(() => location.reload(), 500);
+    });
+  })();
   if ($('tool-root-save'))
     $('tool-root-save').addEventListener('click', () => pushToolCfg({ root: ($('tool-root').value || '').trim() }, 'workspace set'));
   // refresh the config panel whenever the plugins tab is opened

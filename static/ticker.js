@@ -44,7 +44,15 @@
   // master on/off for the whole price strip (default ON). OFF hides it entirely,
   // the same way the board-ticker master switch hides that strip.
   const TICKERS_KEY = 'aeye-price-tickers';
-  const tickersOn = () => localStorage.getItem(TICKERS_KEY) !== '0';
+  // Performance-test profile: when ON and the user hasn't explicitly chosen,
+  // the price strip stays OFF at boot to remove background workload. The user's
+  // explicit choice (either value) always wins; toggling normally still works.
+  const perfProfile = () => localStorage.getItem('aeye-perf-profile') !== '0';
+  const tickersOn = () => {
+    const v = localStorage.getItem(TICKERS_KEY);
+    if (v === null) return !perfProfile();     // unset -> off under perf profile, else on
+    return v !== '0';
+  };
   const setTickers = (on) => localStorage.setItem(TICKERS_KEY, on ? '1' : '0');
 
   // user-added Yahoo symbols, per side: { commodity:[{sym,label}], crypto:[...] }

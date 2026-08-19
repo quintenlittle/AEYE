@@ -436,6 +436,11 @@ things — not just talk about them. Turn on **Allow LLM Tool Access** in
   (guarded — own plan step), plus **Autonomous**-only `run_command`
   (`python`/`node` scripts only, no shell chaining, 10 s cap) and `pip_install`
   (into the workspace's isolated `.venv` only).
+- **Fast routing**: simple questions get a normal answer (no tool machinery); a
+  single-file read/edit/create runs a compact **controller fast-path** (the model
+  decides the change, the app runs the safe preview→hash-gate→write→syntax-check
+  sequence itself) — only genuinely complex/dangerous work pays the full `[PLAN]`
+  cost. A **Force full agent mode** toggle disables routing for A/B testing.
 - **Custom tools**: any plugin declaring `"type":"tool"` becomes callable, reusing
   the same runner (Python **and** Node). A bundled **`word_count`** sample shows the shape.
 - **Permission modes** — **Read Only** · **Read + Write** · **Autonomous** — plus an
