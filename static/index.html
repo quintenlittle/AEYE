@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/style.css?v=16">
 </head>
 <body data-state="idle">
 <script>
@@ -538,7 +538,10 @@ if (!localStorage.getItem('aeye-default-v3')) {
             <legend>P2P chat</legend>
             <label class="chk"><input id="p2p-debug" type="checkbox"> Debug Mode</label>
             <div class="fieldset-hint">On: verbose connection, message and error logs. Off: minimal &mdash; message contents stay out of the logs.</div>
-            <div class="ticker-cfg-head" style="margin-top:10px">Listener log</div>
+            <div class="row" style="margin-top:10px; justify-content:space-between; align-items:center">
+              <span class="ticker-cfg-head">Debug log</span>
+              <button id="p2p-clear-log" type="button" class="ghost">Clear Logs</button>
+            </div>
             <pre id="p2p-log" class="p2p-log"></pre>
           </fieldset>
         </div>
@@ -720,7 +723,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
           <legend>Host</legend>
           <div class="fieldset-hint">Start a session, then share the code plus your IP and port with the peer. The code expires after 10 minutes.</div>
           <div class="p2p-row">
-            <button id="p2p-host-start" type="button">Start Session</button>
+            <button id="p2p-host-start" type="button">Host Session</button>
             <button id="p2p-host-stop" type="button" class="ghost hidden">Stop</button>
             <span class="mini-status" id="p2p-host-status" style="min-height:0"></span>
           </div>
@@ -766,7 +769,8 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
   <div id="p2p-chat" class="p2p-chat hidden">
     <div class="p2p-chat-bar">
       <span class="p2p-chat-title">&#9673; P2P</span>
-      <span id="p2p-chat-status" class="p2p-status ok">Connected</span>
+      <span id="p2p-chat-status" class="p2p-status ok">Encrypted connection</span>
+      <span id="p2p-notify-text" class="p2p-notify-text">Message Received</span>
       <span class="p2p-chat-spacer"></span>
       <button id="p2p-chat-collapse" class="p2p-chat-collapse" type="button" title="Collapse / expand">&#9650;</button>
       <button id="p2p-chat-disconnect" class="ghost" type="button">Disconnect</button>
@@ -798,7 +802,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
 <script src="/static/plugins.js?v=4"></script>
-<script src="/static/p2p.js?v=4"></script>
+<script src="/static/p2p.js?v=6"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>
 /* replace the native white number-spinner on EVERY number input (header knobs,

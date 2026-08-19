@@ -1017,6 +1017,15 @@ def _refresh_phase(name: str) -> None:
         REFRESH.progress_at = time.time()
 
 
+def _catlog(msg: str) -> None:
+    """Verbose catalog/model-discovery logging (dev vs frozen parity debugging).
+    Goes to stdout -> aeye.log, so the two environments can be compared."""
+    try:
+        print("[catalog] " + msg, flush=True)
+    except Exception:
+        pass
+
+
 def _refresh_step(collected: list) -> None:
     """Mark a phase complete: advance the bar + persist partial results, so a
     later stall can't lose (or hide) what we already gathered."""
@@ -1024,6 +1033,15 @@ def _refresh_step(collected: list) -> None:
         REFRESH.done += 1
         REFRESH.progress_at = time.time()
         REFRESH.dynamic = list(collected)
+        phase = REFRESH.phase
+        added = len(collected) - getattr(REFRESH, "_logged_total", 0)
+        REFRESH._logged_total = len(collected)
+        fetched = getattr(REFRESH, "_fetched", 0)
+        skipped = getattr(REFRESH, "_skipped", 0)
+        REFRESH._fetched = 0
+        REFRESH._skipped = 0
+    _catlog("source '{}': +{} new (fetched {}, {} skipped=already-in-catalog) "
+            "| dynamic total {}".format(phase, added, fetched, skipped, len(collected)))
 
 
 # a refresh phase that hasn't advanced in this many seconds is treated as
@@ -1165,13 +1183,21 @@ def _refresh_catalog() -> None:
         REFRESH.error = None
     seen = _catalog_keys()
     collected: list = []
+    REFRESH._logged_total = 0
+    REFRESH._fetched = 0
+    REFRESH._skipped = 0
+    _catlog("refresh starting -- static CATALOG has {} models ({} uncensored); "
+            "dynamic (trending) added on top".format(
+                len(CATALOG), sum(1 for m in CATALOG if m.get("cat") == "uncensored")))
 
     def take(entries):
         for e in entries:
             if not e:
                 continue
+            REFRESH._fetched = getattr(REFRESH, "_fetched", 0) + 1
             k = _dyn_key(e)
-            if k in seen:
+            if k in seen:                    # already in the static catalog / collected
+                REFRESH._skipped = getattr(REFRESH, "_skipped", 0) + 1
                 continue
             seen.add(k)
             collected.append(e)
@@ -1192,6 +1218,9 @@ def _refresh_catalog() -> None:
             except httpx.ConnectError:
                 with REFRESH.lock:
                     REFRESH.state, REFRESH.phase = "offline", "no internet"
+                _catlog("refresh OFFLINE (no internet) -- {} dynamic; the {} static "
+                        "models (incl. uncensored) are still served".format(
+                            len(collected), len(CATALOG)))
                 return
             _refresh_step(collected)
 
@@ -1287,10 +1316,15 @@ def _refresh_catalog() -> None:
             REFRESH.state = "done"
             REFRESH.phase = f"added {len(collected)} models"
         _save_catalog_cache()
+        _catlog("refresh DONE -- {} dynamic + {} static = {} total models "
+                "served by /api/catalog".format(
+                    len(collected), len(CATALOG), len(collected) + len(CATALOG)))
     except Exception as e:
         with REFRESH.lock:
             REFRESH.state, REFRESH.error = "error", f"{type(e).__name__}: {e}"
             REFRESH.phase = "refresh failed"
+        _catlog("refresh FAILED: {}: {} -- {} dynamic collected before failure; "
+                "static catalog still served".format(type(e).__name__, e, len(collected)))
 
 
 # --------------------------------------------------------------------------
@@ -3251,13 +3285,25 @@ def stats():
     return _sys_stats()
 
 
+_last_served_total = None
+
+
 @app.get("/api/catalog")
 def catalog():
+    global _last_served_total
     hw = scan_hardware()
     refresh = _refresh_snapshot()
     with REFRESH.lock:
         dynamic = list(REFRESH.dynamic)
+    # NO filtering here -- every static + dynamic model is returned; `fit` is only
+    # a hardware tag (FITS GPU / CPU ONLY / TOO BIG), never an exclusion.
     models = [{**m, "fit": _fit(m, hw)} for m in CATALOG + dynamic]
+    total = len(models)
+    if total != _last_served_total:            # log only when the count changes
+        _last_served_total = total
+        unc = sum(1 for m in models if m.get("cat") == "uncensored")
+        _catlog("/api/catalog served {} models = {} static + {} dynamic "
+                "({} uncensored, none filtered)".format(total, len(CATALOG), len(dynamic), unc))
     return {"hw": hw, "models": models, "refresh": refresh}
 
 

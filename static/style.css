@@ -1400,6 +1400,7 @@ body.sb-open #sidebar-tab { display: none; }
 .p2p-chat-bar {
   flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
   padding: 7px 10px; border-bottom: 1px solid var(--line);
+  position: relative;                 /* anchors the centred notify text */
 }
 .p2p-chat-title { color: var(--accent); font-size: 12px; letter-spacing: 2px; }
 .p2p-chat-spacer { flex: 1; }
@@ -1413,3 +1414,28 @@ body.sb-open #sidebar-tab { display: none; }
   gap: 8px; padding: 8px 10px;
 }
 .p2p-chat.collapsed .p2p-chat-body { display: none; }
+
+/* new-message notification: a subtle red "breathing" glow (theme red = --vein),
+   smooth pulse, low intensity -- no harsh blinking. Collapsed -> the bar
+   breathes + status reads "Message Received"; expanded -> the container glows. */
+@keyframes p2pBreathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 95, 86, .30), 0 0 6px rgba(255, 95, 86, .22); }
+  50%      { box-shadow: inset 0 0 0 1px rgba(255, 95, 86, .70), 0 0 18px rgba(255, 95, 86, .50); }
+}
+@keyframes p2pBreatheSoft {
+  0%, 100% { box-shadow: 0 8px 30px rgba(0, 0, 0, .55), 0 0 4px rgba(255, 95, 86, .12); }
+  50%      { box-shadow: 0 8px 30px rgba(0, 0, 0, .55), 0 0 13px rgba(255, 95, 86, .38); }
+}
+.p2p-chat.notify.collapsed .p2p-chat-bar { animation: p2pBreathe 2.4s ease-in-out infinite; border-radius: 6px; }
+.p2p-chat.notify:not(.collapsed) { animation: p2pBreatheSoft 3s ease-in-out infinite; }
+.p2p-status.alert { color: var(--vein); border-color: var(--vein); }
+/* separate "Message Received" text: plain, red, horizontally centred in the bar,
+   absolutely positioned so it never resizes/repositions the existing controls.
+   Hidden by default; shown only while the .notify class is set. */
+.p2p-notify-text {
+  display: none; position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--vein); font-size: 12px; letter-spacing: 1px;
+  white-space: nowrap; pointer-events: none;
+}
+.p2p-chat.notify .p2p-notify-text { display: block; }
