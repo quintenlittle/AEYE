@@ -27,6 +27,7 @@ datas = [
     (_res("skull.txt"), "."),
     (_res("version.txt"), "."),
     (_res("AEYE.ico"), "."),
+    (_res("aeye-4chan-relay.py"), "."),   # board-ticker relay (started in-process at boot)
     (_res("plugins", "echo"), os.path.join("plugins", "echo")),
     (_res("plugins", "rss"), os.path.join("plugins", "rss")),
 ]
@@ -43,6 +44,15 @@ hiddenimports += [
     # analyzer never drops the submodules
     "p2p", "p2p.session", "p2p.connection", "p2p.upnp", "p2p.tls", "p2p.filetransfer",
 ]
+
+# miniupnpc powers P2P UPnP NAT traversal but is OPTIONAL -- bundle it only when
+# it's installed in the build env, so a build without it still succeeds (the app
+# falls back to LAN-only at runtime).
+try:
+    import miniupnpc  # noqa: F401
+    hiddenimports.append("miniupnpc")
+except Exception:
+    pass
 
 # pull in package data + native libs for the runtime deps that ship them
 # (piper voices download via huggingface_hub; pedalboard powers the voice FX)

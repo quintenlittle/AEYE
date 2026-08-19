@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=17">
+<link rel="stylesheet" href="/static/style.css?v=23">
 </head>
 <body data-state="idle">
 <script>
@@ -53,17 +53,6 @@ if (!localStorage.getItem('aeye-default-v3')) {
         <input id="num-ctx" type="number" value="16384" min="512" step="512">
       </label>
       <button id="clear" title="Clear conversation">clear</button>
-      <div id="sysmon" title="Live system usage — CPU / RAM / GPU / VRAM / network"></div>
-      <div id="clock" title="Local system date &amp; time"></div>
-    </div>
-    <div id="badges">
-      <span class="badge" id="ollama-badge">ollama: &hellip;</span>
-      <span class="badge" id="hf-badge">hf: &hellip;</span>
-      <span class="badge" id="img-badge" title="Image-generation pipeline">img: &hellip;</span>
-      <span class="badge" id="vid-badge" title="Video-generation pipeline">vid: &hellip;</span>
-      <span class="badge" id="hw-badge" title="Detected hardware">scanning hw&hellip;</span>
-    </div>
-    <div id="model-bar">
       <select id="model-select" title="Active model"></select>
       <button id="refresh" title="Refresh model list">&#8635;</button>
       <div id="nav-group">
@@ -179,6 +168,21 @@ if (!localStorage.getItem('aeye-default-v3')) {
       </div>
     </aside>
       </div><!-- /#stage-content -->
+      <!-- SYSTEM MONITOR BAR (CPU/RAM/GPU/VRAM/NET · clock · ollama/hf/img/vid · GPU name).
+           HIDDEN FOR NOW (too much on screen; to be relocated later). Markup + JS
+           wiring are kept intact so nothing breaks. TO RESTORE: delete class="hidden"
+           from the #badges div below. -->
+  <div id="badges" class="hidden">
+    <div id="sysmon" title="Live system usage — CPU / RAM / GPU / VRAM / network"></div>
+    <div id="clock" title="Local system date &amp; time"></div>
+    <div id="status-chips">
+      <span class="badge" id="ollama-badge">ollama: &hellip;</span>
+      <span class="badge" id="hf-badge">hf: &hellip;</span>
+      <span class="badge" id="img-badge" title="Image-generation pipeline">img: &hellip;</span>
+      <span class="badge" id="vid-badge" title="Video-generation pipeline">vid: &hellip;</span>
+      <span class="badge" id="hw-badge" title="Detected hardware">scanning hw&hellip;</span>
+    </div>
+  </div>
       <!-- composer: bottom bar spanning the chat column + sidebar only (never
            the eye box); hidden during imagine/dream via a :has() rule in style.css -->
   <form id="composer" autocomplete="off">
@@ -757,7 +761,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
             <button id="p2p-guide" type="button" class="ghost">Open Port Forwarding Guide</button>
             <span class="mini-status" id="p2p-upnp-status" style="min-height:0"></span>
           </div>
-          <div class="fieldset-hint">To be reachable over the internet, forward this port on your router to this PC. Auto-forwarding uses UPnP if your router allows it (stubbed in this build &mdash; returns unavailable for now).</div>
+          <div class="fieldset-hint">To be reachable over the internet, forward this port on your router to this PC. Auto-forwarding uses UPnP if your router supports it; if UPnP is unavailable, AEYE stays in LAN-only mode &mdash; use the manual port-forwarding guide.</div>
         </fieldset>
 
         <fieldset class="p2p-sec">

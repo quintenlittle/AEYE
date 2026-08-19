@@ -435,20 +435,25 @@ shares a short code; the other **connects** to it over a plain TCP socket
   are split into configurable chunks (**64–256 KB**), streamed across interleaved
   lanes on the single socket and reassembled by index, with real-time progress —
   speed, chunk count, ETA — in the chat box and a **Details / Pieces / Bandwidth**
-  panel in the P2P window. Incoming files land on your **Desktop** (or Downloads,
-  your choice). With Debug **off**, nothing is logged and no file names or transfer
-  data are stored — it all stays in memory for the session only.
-- **Network Tools** — a checkbox for **UPnP** auto port-forwarding (**in progress**)
-  and a link to a **port-forwarding guide**, for reaching a peer across the
-  internet. On the same LAN, the local IP + port is enough.
+  panel in the P2P window. Everything streams straight from disk to disk, so
+  **multi-GB files transfer with flat memory** (no full-file buffering). Incoming
+  files land on your **Desktop** (or Downloads, your choice). With Debug **off**,
+  nothing is logged and no file names or transfer data are stored — it all stays in
+  memory for the session only.
+- **Network Tools** — **UPnP auto port-forwarding**: AEYE asks your router (via
+  UPnP/IGD) to open the P2P port automatically so a peer can reach you across the
+  internet, and keeps the mapping refreshed. If your router has no UPnP or it's
+  switched off, AEYE **falls back to LAN-only** and points you to the **manual
+  port-forwarding guide** — it never blocks or crashes. On the same LAN, the local
+  IP + port is enough.
 - **Debug Mode** — off by default; on, it surfaces verbose connection/error
   logs. Off keeps message **contents out of the logs** entirely.
 
 If a connection is blocked it's almost always a **VPN or firewall** — the window
 says so and suggests disabling the VPN or allowing AEYE through the firewall.
 
-This layer is **fully encrypted with TLS**, and **direct P2P file transfer** is now
-live (see above). **UPnP auto port-forwarding** is in progress.
+This layer is **fully encrypted with TLS**, with **direct P2P file transfer** and
+**automatic UPnP port-forwarding** both live (see above).
 
 **Future mesh network chat compatibility on deck** - no planned release date yet...
 

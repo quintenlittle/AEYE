@@ -8,7 +8,11 @@ from .connection import (
     P2PListener, connect_and_auth, DEFAULT_PORT,
     HUB, send_chat, run_chat_loop, open_chat_client, set_debug,   # Phase 2: chat
 )
-from .upnp import attempt_port_forward, remove_port_forward
+from .upnp import (
+    attempt_port_forward, remove_port_forward,
+    autostart as upnp_autostart, external_ip as upnp_external_ip,
+    last_error as upnp_last_error, available as upnp_available,
+)
 from .tls import configure as set_cert_dir, ensure_cert           # Phase 4: TLS
 from . import filetransfer                                        # Phase 5: files
 # importing filetransfer registers its read-loop message handler (additive)
@@ -25,7 +29,8 @@ __all__ = [
     "SessionManager", "generate_code", "SESSION_TTL_SECONDS",
     "P2PListener", "connect_and_auth", "DEFAULT_PORT",
     "HUB", "send_chat", "run_chat_loop", "open_chat_client", "set_debug",
-    "attempt_port_forward", "remove_port_forward",
+    "attempt_port_forward", "remove_port_forward", "upnp_autostart", "upnp_external_ip",
+    "upnp_last_error", "upnp_available",
     "set_cert_dir", "ensure_cert",
     "filetransfer", "file_start_send", "file_configure_download", "file_dirs",
     "file_reset", "file_set_debug",

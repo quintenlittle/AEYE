@@ -5645,6 +5645,76 @@ def _p2p_prewarm_tls():
 threading.Thread(target=_p2p_prewarm_tls, name="p2p-tls-warm", daemon=True).start()
 
 
+# --------------------------------------------------------------------------
+# Board-ticker relay autostart. The relay (aeye-4chan-relay.py) MUST come up on
+# every AEYE launch, unconditionally -- no battery/power gate (the old
+# ONLOGON scheduled task inherited Windows' "only on AC power" default, which is
+# the bug this replaces). We run it IN-PROCESS on a hidden daemon thread rather
+# than the spec's literal subprocess.Popen(sys.executable, ...): under the frozen
+# PyInstaller build sys.executable is AEYE.exe (not a Python), so a subprocess
+# would relaunch the whole app. An in-process thread is windowless by nature,
+# needs no external Python, works on every machine, and never blocks startup.
+def _relay_path():
+    """Locate aeye-4chan-relay.py across source + frozen layouts."""
+    cands = [
+        paths.resource("aeye-4chan-relay.py"),                 # source root / bundle
+        os.path.join(os.path.dirname(sys.executable), "aeye-4chan-relay.py"),  # install root
+        os.path.join(paths.DATA_DIR, "relay", "aeye-4chan-relay.py"),          # task location
+    ]
+    for p in cands:
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def start_relay():
+    """Bring the local 4chan CORS relay up in-process (daemon, hidden,
+    non-blocking). Silent on any failure -- the relay is best-effort; if the port
+    is already bound (e.g. a leftover scheduled-task instance) that's fine, the
+    relay is already serving."""
+    try:
+        import importlib.util
+        from http.server import ThreadingHTTPServer
+        rp = _relay_path()
+        if not rp:
+            return
+        spec = importlib.util.spec_from_file_location("aeye_relay_mod", rp)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)                # defines Handler/HOST/PORT only
+        host = getattr(mod, "HOST", "127.0.0.1")
+        port = getattr(mod, "PORT", 8788)
+
+        def _serve():
+            try:
+                srv = ThreadingHTTPServer((host, port), mod.Handler)
+            except OSError:
+                return                              # already bound -> relay is up
+            except Exception:
+                return
+            try:
+                srv.serve_forever()
+            except Exception:
+                pass
+
+        threading.Thread(target=_serve, name="aeye-relay", daemon=True).start()
+    except Exception:
+        pass                                        # never let the relay break boot
+
+
+start_relay()
+
+
+# Best-effort UPnP NAT traversal at boot: map the P2P listener port so a peer can
+# reach this instance over the internet. Runs on a background thread and fails
+# silently (LAN-only) when miniupnpc is absent or the router has no UPnP/IGD.
+# NOTE: we map the P2P port (p2p.DEFAULT_PORT, 8131), not 8130 -- 8130 is AEYE's
+# local HTTP server and forwarding it would not help P2P connectivity.
+try:
+    p2p.upnp_autostart(p2p.DEFAULT_PORT)
+except Exception:
+    pass
+
+
 def _lan_ip() -> str:
     """Best-effort LAN IP of this machine, for a peer to dial. Falls back to
     127.0.0.1. No packet is sent -- connect() on a UDP socket just picks the
@@ -5747,14 +5817,21 @@ def p2p_connect(req: P2PConnectReq):
 
 @app.post("/api/p2p/upnp")
 def p2p_upnp(req: P2PUpnpReq):
-    """Attempt (or remove) a UPnP port forward. Phase 1: the stub always returns
-    False, so the UI wiring works today and gains real behaviour later."""
+    """Attempt (or remove) a UPnP port forward via miniupnpc. On failure the app
+    stays in LAN-only mode and returns a truthful reason for the UI."""
     port = int(req.port) if req.port else (
         _p2p_listener.port if _p2p_listener else p2p.DEFAULT_PORT)
     ok = p2p.attempt_port_forward(port) if req.enable else p2p.remove_port_forward(port)
-    return {"ok": ok, "port": port,
-            "note": None if ok else
-            "UPnP not available yet (stub) -- use the manual port-forwarding guide"}
+    note = None
+    if not ok:
+        if not p2p.upnp_available():
+            note = "UPnP support not installed -- use the manual port-forwarding guide"
+        else:
+            # miniupnpc loaded fine; the router either has no IGD or UPnP is
+            # switched off in its settings. Point the user there.
+            note = ("UPnP couldn't map the port -- enable UPnP in your router's "
+                    "settings, or use the manual port-forwarding guide")
+    return {"ok": ok, "port": port, "note": note}
 
 
 def _p2p_shutdown():
@@ -5923,16 +6000,37 @@ def p2p_file_config(req: P2PFileCfgReq):
 async def p2p_file_send(request: Request, name: str = "", chunk_size: int = 0,
                         lanes: int = 0):
     """Raw-body upload (?name=&chunk_size=&lanes=) of a file to transfer to the
-    peer. Same shape as /api/docs/upload -- no multipart, no extra dep. The
-    bytes are handed to a FileSender that chunks + base64s them over the socket.
-    Nothing is written to disk on THIS (sender) side."""
+    peer. STREAMING: the request body is written to a temp spool file in fixed-size
+    pieces (never held whole in RAM), then a FileSender streams it chunk-by-chunk
+    off disk over the socket and deletes the spool when done. This keeps server
+    memory flat for arbitrarily large files (multi-GB safe)."""
     if not p2p.HUB.connected():
         return {"ok": False, "error": "not connected"}
-    data = await request.body()
-    if not data:
+    # spool to a randomly-named temp file (no original name on disk -> privacy)
+    fd, spool = tempfile.mkstemp(prefix="aeye-xfer-", suffix=".part")
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as f:
+            async for piece in request.stream():     # ~64 KB pieces from Starlette
+                if piece:
+                    f.write(piece)
+                    size += len(piece)
+    except Exception as e:
+        try:
+            os.remove(spool)
+        except Exception:
+            pass
+        return {"ok": False, "error": "upload failed: {}".format(type(e).__name__)}
+    if size == 0:
+        try:
+            os.remove(spool)
+        except Exception:
+            pass
         return {"ok": False, "error": "empty upload"}
-    return p2p.file_start_send(name, data, chunk_size or p2p.DEFAULT_CHUNK,
-                               lanes or p2p.DEFAULT_LANES)
+    # hand the spool to the sender; it streams from disk and deletes it afterwards
+    return p2p.file_start_send(name, spool, size,
+                               chunk_size or p2p.DEFAULT_CHUNK,
+                               lanes or p2p.DEFAULT_LANES, cleanup=True)
 
 
 def _p2p_chat_shutdown():

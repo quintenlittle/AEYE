@@ -62,6 +62,10 @@ MAX_IN_FLIGHT = 32              # bounded send queue == in-flight chunk cap
 _THROTTLE_CHUNKS = 16
 _THROTTLE_MS = 250
 
+# receiver flushes its OS buffers this often (every few MB, NOT per chunk) so a
+# large transfer doesn't grow the Python write buffer without bound
+_FLUSH_BYTES = 4 * 1024 * 1024
+
 # ---- module state (in-memory ONLY -- nothing is persisted to disk) --------
 _DEBUG = False
 _cfg_lock = threading.Lock()
@@ -173,14 +177,19 @@ def _unique_path(directory: str, name: str) -> str:
 class FileSender(threading.Thread):
     """Chunk + base64 + interleave a file over the single shared socket."""
 
-    def __init__(self, conn, name: str, data: bytes,
-                 chunk_size: int = DEFAULT_CHUNK, lanes: int = DEFAULT_LANES):
+    def __init__(self, conn, name: str, src_path: str, size: int = -1,
+                 chunk_size: int = DEFAULT_CHUNK, lanes: int = DEFAULT_LANES,
+                 cleanup: bool = True):
         super().__init__(name="p2p-filesend", daemon=True)
         self.conn = conn
         self.id = uuid.uuid4().hex
         self.name = _safe_name(name)
-        self.data = data
-        self.size = len(data)
+        # STREAMING: we never hold the file in memory -- lane workers read their
+        # chunk straight off disk (each with its own handle) at send time, so RAM
+        # stays flat regardless of file size.
+        self.src_path = src_path
+        self.cleanup = bool(cleanup)      # delete the spool file when finished
+        self.size = int(size) if size is not None and size >= 0 else os.path.getsize(src_path)
         self.chunk_size = clamp_chunk(chunk_size)
         self.total_chunks = max(1, math.ceil(self.size / self.chunk_size)) if self.size else 0
         self.lanes = max(1, min(MAX_LANES, int(lanes or DEFAULT_LANES)))
@@ -233,7 +242,22 @@ class FileSender(threading.Thread):
             self.name, n, self.total_chunks, speed))
 
     # -- run -----------------------------------------------------------------
+    def _cleanup_spool(self) -> None:
+        """Delete the on-disk spool (the streamed upload) once we're done with
+        it -- nothing is left on the sender's disk after a transfer."""
+        if self.cleanup and self.src_path:
+            try:
+                os.remove(self.src_path)
+            except Exception:
+                pass
+
     def run(self) -> None:
+        try:
+            self._run()
+        finally:
+            self._cleanup_spool()
+
+    def _run(self) -> None:
         self._t0 = time.time()
         _log("[FILE START] up id={} name={} size={} chunks={} lanes={}".format(
             self.id, self.name, self.size, self.total_chunks, self.lanes))
@@ -249,18 +273,38 @@ class FileSender(threading.Thread):
             return
         _log("[FILE META] up sent id={}".format(self.id))
 
-        # bounded queue == in-flight cap; a pool of lane workers drains it
+        # Bounded index queue == the in-flight window (backpressure): it holds
+        # chunk INDICES only (not data). When the receiver/socket falls behind,
+        # sendall() blocks -> workers block -> the queue fills -> the producer
+        # blocks. Nothing accumulates: at most `lanes` chunks are read into RAM at
+        # once, so memory is flat no matter how big the file is.
         q = queue.Queue(maxsize=MAX_IN_FLIGHT)
         errs = []
+        handles = []
+        hlock = threading.Lock()
 
         def worker():
+            # each lane gets its OWN read handle so seeks never race
+            try:
+                fh = open(self.src_path, "rb", buffering=0)
+            except Exception:
+                errs.append(-1)
+                self._cancel.set()
+                # still drain the queue so the producer doesn't block forever
+                while True:
+                    if q.get() is None:
+                        q.task_done()
+                        return
+                    q.task_done()
+            with hlock:
+                handles.append(fh)
             while True:
                 idx = q.get()
                 try:
                     if idx is None or self._cancel.is_set():
                         return
-                    off = idx * self.chunk_size
-                    piece = self.data[off:off + self.chunk_size]
+                    fh.seek(idx * self.chunk_size)
+                    piece = fh.read(self.chunk_size)      # <= chunk_size bytes off disk
                     b64 = base64.b64encode(piece).decode("ascii")
                     ok = self._send_obj({"type": "file_chunk", "id": self.id,
                                          "index": idx, "data": b64})
@@ -288,6 +332,11 @@ class FileSender(threading.Thread):
             q.put(None)                 # sentinels
         for w in pool:
             w.join()
+        for fh in handles:              # close all lane read handles
+            try:
+                fh.close()
+            except Exception:
+                pass
 
         if self._cancel.is_set() or errs:
             _emit("error", "up", self.id, name=self.name, error="transfer aborted")
@@ -321,8 +370,16 @@ class FileReceiver:
         self.lanes = int(meta.get("lanes") or DEFAULT_LANES)
         self.path = _unique_path(_dest_dir(), self.name)
         self._f = open(self.path, "wb")
+        # pre-allocate so seek-writes land in a single contiguous file (option 1:
+        # pre-allocated file + seek offsets -- no temp parts, no merge race)
+        if self.size > 0:
+            try:
+                self._f.truncate(self.size)
+            except Exception:
+                pass
         self._seen = set()
         self._recv_bytes = 0
+        self._since_flush = 0
         self._t0 = time.time()
         self._last_emit = 0.0
         self._last_emit_n = 0
@@ -350,6 +407,13 @@ class FileReceiver:
         if index not in self._seen:
             self._seen.add(index)
             self._recv_bytes += len(raw)
+        self._since_flush += len(raw)
+        if self._since_flush >= _FLUSH_BYTES:   # flush every few MB, not per chunk
+            try:
+                self._f.flush()
+            except Exception:
+                pass
+            self._since_flush = 0
         self._maybe_progress()
 
     def _maybe_progress(self, force=False) -> None:
@@ -397,12 +461,21 @@ class FileReceiver:
 # ==========================================================================
 # REGISTRY + read-loop hook
 # ==========================================================================
-def start_send(name: str, data: bytes, chunk_size: int, lanes: int) -> dict:
-    """Kick off an outgoing transfer on the active socket. Returns {ok,id,...}."""
+def start_send(name: str, src_path: str, size: int, chunk_size: int, lanes: int,
+               cleanup: bool = True) -> dict:
+    """Kick off an outgoing transfer of the file spooled at ``src_path`` on the
+    active socket. The sender STREAMS from disk (never buffers the file) and, when
+    ``cleanup`` is set, deletes the spool once finished. Returns {ok,id,...}."""
     conn = connection.HUB.active()
     if conn is None:
+        # nothing started -> caller owns the spool; drop it so nothing leaks
+        if cleanup and src_path:
+            try:
+                os.remove(src_path)
+            except Exception:
+                pass
         return {"ok": False, "error": "not connected"}
-    s = FileSender(conn, name, data, chunk_size, lanes)
+    s = FileSender(conn, name, src_path, size, chunk_size, lanes, cleanup=cleanup)
     with _reg_lock:
         _senders[s.id] = s
     s.start()

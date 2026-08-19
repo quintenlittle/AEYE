@@ -90,7 +90,7 @@ body {
 
 header {
   display: flex;
-  flex-direction: column;          /* three stacked tiers: knobs, badges, model-bar */
+  flex-direction: column;          /* tickers + board + the controls row (#knobs) */
   gap: 8px;                        /* vertical space between the tiers */
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
@@ -98,16 +98,37 @@ header {
   flex-wrap: wrap;
 }
 
-/* the three header tiers each center their own content and wrap when narrow */
-#knobs, #badges, #model-bar {
+/* controls tier: one centered, wrapping row */
+#knobs {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
 }
 
-#model-bar { gap: 8px; row-gap: 6px; }
-#badges { gap: 8px; row-gap: 6px; }
+/* system-monitor bar: one centred cluster -> [meters · clock · chips], evenly
+   spaced. Docked at the bottom of the stage, directly above the composer. */
+#badges {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 18px;                        /* even space between meters / clock / chips */
+  row-gap: 6px;
+  padding: 5px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+#badges.hidden { display: none; }        /* sysmon row hidden for now (see index.html) */
+#status-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  row-gap: 6px;
+  min-width: 0;
+}
 /* manage/library/imagine/memory move as ONE unit: they stay on a single line
    (nowrap) and drop together to the next row when the window is too narrow,
    instead of splitting 2-and-2 */
@@ -309,7 +330,7 @@ button:disabled { opacity: .4; cursor: default; }
   display: flex;
   align-items: center;
   flex-wrap: wrap;                 /* gauges wrap instead of clipping when tight */
-  gap: 12px;                       /* even spacing between the packed gauges */
+  gap: 8px;                        /* tighter spacing between the packed gauges */
   row-gap: 6px;
   min-width: 0;
 }
