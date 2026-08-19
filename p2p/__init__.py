@@ -10,6 +10,16 @@ from .connection import (
 )
 from .upnp import attempt_port_forward, remove_port_forward
 from .tls import configure as set_cert_dir, ensure_cert           # Phase 4: TLS
+from . import filetransfer                                        # Phase 5: files
+# importing filetransfer registers its read-loop message handler (additive)
+from .filetransfer import (
+    start_send as file_start_send,
+    configure_download as file_configure_download,
+    dirs as file_dirs,
+    reset as file_reset,
+    set_debug as file_set_debug,
+    MIN_CHUNK, MAX_CHUNK, DEFAULT_CHUNK, DEFAULT_LANES,
+)
 
 __all__ = [
     "SessionManager", "generate_code", "SESSION_TTL_SECONDS",
@@ -17,4 +27,7 @@ __all__ = [
     "HUB", "send_chat", "run_chat_loop", "open_chat_client", "set_debug",
     "attempt_port_forward", "remove_port_forward",
     "set_cert_dir", "ensure_cert",
+    "filetransfer", "file_start_send", "file_configure_download", "file_dirs",
+    "file_reset", "file_set_debug",
+    "MIN_CHUNK", "MAX_CHUNK", "DEFAULT_CHUNK", "DEFAULT_LANES",
 ]

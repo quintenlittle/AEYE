@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=16">
+<link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body data-state="idle">
 <script>
@@ -760,6 +760,46 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
           <div class="fieldset-hint">To be reachable over the internet, forward this port on your router to this PC. Auto-forwarding uses UPnP if your router allows it (stubbed in this build &mdash; returns unavailable for now).</div>
         </fieldset>
 
+        <fieldset class="p2p-sec">
+          <legend>File Transfer</legend>
+          <div class="fieldset-hint">Send any file to the connected peer over the encrypted connection. Incoming files are saved to your download location. Available once a peer is connected.</div>
+          <div class="p2p-row">
+            <button id="p2p-file-upload" type="button">Upload File</button>
+            <button id="p2p-file-clear" type="button" class="ghost">Clear Transfers</button>
+            <span class="mini-status" id="p2p-file-status" style="min-height:0"></span>
+          </div>
+          <input id="p2p-file-input" type="file" multiple hidden>
+          <div class="p2p-xfer-settings">
+            <label>Chunk size
+              <select id="p2p-file-chunk">
+                <option value="65536">64 KB</option>
+                <option value="131072">128 KB</option>
+                <option value="262144">256 KB</option>
+              </select>
+            </label>
+            <label>Download location
+              <select id="p2p-file-loc">
+                <option value="desktop">Desktop</option>
+                <option value="downloads">Downloads</option>
+              </select>
+            </label>
+          </div>
+          <div class="p2p-xfer-tabs">
+            <button type="button" class="p2p-xtab active" data-xtab="details">Details</button>
+            <button type="button" class="p2p-xtab" data-xtab="pieces">Pieces</button>
+            <button type="button" class="p2p-xtab" data-xtab="bandwidth">Bandwidth</button>
+          </div>
+          <div class="p2p-xfer-panel" id="p2p-xfer-details">
+            <div class="p2p-xfer-empty">No transfers yet.</div>
+          </div>
+          <div class="p2p-xfer-panel hidden" id="p2p-xfer-pieces">
+            <div class="p2p-xfer-empty">No active transfer to visualize.</div>
+          </div>
+          <div class="p2p-xfer-panel hidden" id="p2p-xfer-bandwidth">
+            <canvas id="p2p-xfer-bw" width="360" height="120"></canvas>
+          </div>
+        </fieldset>
+
       </div>
     </div>
   </div>
@@ -777,11 +817,14 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
     </div>
     <div class="p2p-chat-body">
       <div id="p2p-chat-log" class="p2p-chat-log" aria-live="polite"></div>
+      <div id="p2p-transfers" class="p2p-transfers hidden" aria-live="polite"></div>
       <div class="p2p-chat-input">
         <input id="p2p-chat-msg" spellcheck="true" autocomplete="off" placeholder="type a message…">
+        <button id="p2p-chat-attach" type="button" title="Send a file">&#128206;</button>
         <button id="p2p-chat-send" type="button">Send</button>
       </div>
     </div>
+    <div class="p2p-drop-hint">Drop file to send</div>
   </div>
 
 <script src="/static/eye.js?v=2"></script>
@@ -802,7 +845,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
 <script src="/static/plugins.js?v=4"></script>
-<script src="/static/p2p.js?v=6"></script>
+<script src="/static/p2p.js?v=7"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>
 /* replace the native white number-spinner on EVERY number input (header knobs,

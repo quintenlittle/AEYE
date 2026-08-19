@@ -41,7 +41,7 @@ hiddenimports += [
     "webview.platforms.winforms", "clr",
     # local P2P package (imported by server.py) -- belt-and-braces so the
     # analyzer never drops the submodules
-    "p2p", "p2p.session", "p2p.connection", "p2p.upnp", "p2p.tls",
+    "p2p", "p2p.session", "p2p.connection", "p2p.upnp", "p2p.tls", "p2p.filetransfer",
 ]
 
 # pull in package data + native libs for the runtime deps that ship them

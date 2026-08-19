@@ -1439,3 +1439,81 @@ body.sb-open #sidebar-tab { display: none; }
   white-space: nowrap; pointer-events: none;
 }
 .p2p-chat.notify .p2p-notify-text { display: block; }
+
+/* ================= P2P file transfer ================= */
+/* attach (paperclip) button in the chat input row */
+.p2p-chat-input #p2p-chat-attach {
+  flex: 0 0 auto; background: none; border: 1px solid var(--line); border-radius: 4px;
+  color: var(--sclera); cursor: pointer; padding: 0 9px; font-size: 14px; line-height: 1;
+}
+.p2p-chat-input #p2p-chat-attach:hover { color: var(--accent); border-color: var(--accent); }
+
+/* chatbox transfer panel -- appears above the input while transfers exist */
+.p2p-transfers {
+  flex: 0 0 auto; max-height: 34%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  border-top: 1px dashed var(--line); padding-top: 8px;
+}
+.p2p-transfers.hidden { display: none; }
+
+/* one transfer row (shared by chatbox + P2P window Details tab) */
+.p2p-xfer-row { display: flex; flex-direction: column; gap: 3px; font: 11px var(--mono); }
+.p2p-xfer-name { color: var(--fg); word-break: break-all; }
+.p2p-xfer-name span { color: var(--accent); float: right; margin-left: 8px; }
+.p2p-xfer-bar {
+  height: 8px; background: var(--well); border: 1px solid var(--line);
+  border-radius: 4px; overflow: hidden;
+}
+.p2p-xfer-bar i {
+  display: block; height: 100%; width: 0; background: var(--accent);
+  transition: width .25s ease;
+}
+.p2p-xfer-meta { color: var(--sclera); font-size: 10px; }
+.p2p-xfer-row.done .p2p-xfer-bar i { background: var(--streaming, #7dff8a); }
+.p2p-xfer-row.err  .p2p-xfer-bar i { background: var(--vein); }
+.p2p-xfer-row.err  .p2p-xfer-name span { color: var(--vein); }
+
+/* drag-over hint on the chat panel */
+.p2p-chat .p2p-drop-hint {
+  display: none; position: absolute; inset: 0; z-index: 5;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55); color: var(--accent);
+  border: 2px dashed var(--accent); border-radius: 6px;
+  font: 14px var(--mono); letter-spacing: 1px; pointer-events: none;
+}
+.p2p-chat.dragging .p2p-drop-hint { display: flex; }
+
+/* ---- P2P window: File Transfer section ---- */
+.p2p-xfer-settings { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0; }
+.p2p-xfer-settings label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--sclera); }
+.p2p-xfer-settings select {
+  background: var(--well); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 4px; font: 12px var(--mono); padding: 4px 6px;
+}
+.p2p-xfer-tabs { display: flex; gap: 4px; margin-top: 6px; }
+.p2p-xtab {
+  background: none; border: 1px solid var(--line); border-bottom: none;
+  border-radius: 4px 4px 0 0; color: var(--sclera); cursor: pointer;
+  padding: 4px 12px; font: 11px var(--mono);
+}
+.p2p-xtab:hover { color: var(--accent); }
+.p2p-xtab.active { color: var(--accent); border-color: var(--accent); background: var(--well); }
+.p2p-xfer-panel {
+  border: 1px solid var(--line); border-radius: 0 4px 4px 4px;
+  padding: 10px; min-height: 90px; max-height: 220px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.p2p-xfer-panel.hidden { display: none; }
+.p2p-xfer-empty { color: var(--sclera); font-size: 11px; opacity: .7; }
+.p2p-xfer-head { color: var(--fg); font: 11px var(--mono); margin-bottom: 6px; word-break: break-all; }
+
+/* Pieces grid (chunk visualization) */
+.p2p-pieces { display: flex; flex-wrap: wrap; gap: 2px; }
+.p2p-pieces span {
+  width: 9px; height: 9px; background: var(--well);
+  border: 1px solid var(--line); border-radius: 1px;
+}
+.p2p-pieces span.on { background: var(--accent); border-color: var(--accent); }
+
+/* Bandwidth canvas */
+#p2p-xfer-bw { width: 100%; max-width: 100%; height: 120px; display: block; }

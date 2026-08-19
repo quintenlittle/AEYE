@@ -5818,6 +5818,7 @@ def p2p_debug(req: P2PDebugReq):
     global _p2p_debug
     _p2p_debug = bool(req.enabled)
     p2p.set_debug(_p2p_debug)
+    p2p.file_set_debug(_p2p_debug)     # file transfer honours the same switch
     return {"ok": True, "debug": _p2p_debug}
 
 
@@ -5879,6 +5880,10 @@ def p2p_chat_connect(req: P2PConnectReq):
 def p2p_chat_disconnect():
     """Close this instance's client connection (host side uses /host/stop)."""
     global _p2p_client_conn
+    try:
+        p2p.file_reset()           # abort any in-flight transfers (in-memory)
+    except Exception:
+        pass
     with _p2p_client_lock:
         if _p2p_client_conn is not None:
             try:
@@ -5889,7 +5894,52 @@ def p2p_chat_disconnect():
     return {"ok": True}
 
 
+# ------------------------------------------------------------------------
+# P2P Phase 5: file transfer over the SAME authenticated TLS connection.
+# All logic lives in p2p/filetransfer.py; these routes are the thin HTTP
+# bridge (upload the bytes / set the save dir). Progress is delivered through
+# the existing /api/p2p/poll event stream (kind == "file").
+# ------------------------------------------------------------------------
+class P2PFileCfgReq(BaseModel):
+    location: str = "desktop"        # 'desktop' | 'downloads' | 'custom'
+    custom_path: str = ""
+
+
+@app.get("/api/p2p/file/dirs")
+def p2p_file_dirs():
+    """Well-known save dirs for the download-location setting UI."""
+    return {"ok": True, **p2p.file_dirs()}
+
+
+@app.post("/api/p2p/file/config")
+def p2p_file_config(req: P2PFileCfgReq):
+    """Set where INCOMING files are saved (in-memory; the frontend persists the
+    choice in localStorage)."""
+    path = p2p.file_configure_download(req.location, req.custom_path)
+    return {"ok": True, "path": path}
+
+
+@app.post("/api/p2p/file/send")
+async def p2p_file_send(request: Request, name: str = "", chunk_size: int = 0,
+                        lanes: int = 0):
+    """Raw-body upload (?name=&chunk_size=&lanes=) of a file to transfer to the
+    peer. Same shape as /api/docs/upload -- no multipart, no extra dep. The
+    bytes are handed to a FileSender that chunks + base64s them over the socket.
+    Nothing is written to disk on THIS (sender) side."""
+    if not p2p.HUB.connected():
+        return {"ok": False, "error": "not connected"}
+    data = await request.body()
+    if not data:
+        return {"ok": False, "error": "empty upload"}
+    return p2p.file_start_send(name, data, chunk_size or p2p.DEFAULT_CHUNK,
+                               lanes or p2p.DEFAULT_LANES)
+
+
 def _p2p_chat_shutdown():
+    try:
+        p2p.file_reset()
+    except Exception:
+        pass
     try:
         if _p2p_client_conn:
             _p2p_client_conn.close()

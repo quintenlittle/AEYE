@@ -293,12 +293,40 @@ class _ChatHub:
 HUB = _ChatHub()
 
 
+# A single socket now carries BOTH chat lines and file chunks (from several
+# lane-worker threads). Two concurrent sendall() calls on one socket can
+# interleave partial writes and corrupt the NDJSON stream, so ALL sends go
+# through this lock. This is a thread-safety wrapper only -- the chat wire
+# format, handshake and semantics are byte-for-byte unchanged.
+SEND_LOCK = threading.Lock()
+
+
+def safe_sendall(conn, data: bytes) -> None:
+    """Serialize every socket write through :data:`SEND_LOCK`. Raises on error
+    (callers decide how to handle it)."""
+    with SEND_LOCK:
+        conn.sendall(data)
+
+
+# ---- registered extension handler for non-chat message types --------------
+# The post-auth read loop owns the single socket, so any additive feature
+# (e.g. file transfer) must receive its messages through here. A handler is
+# offered every message whose type isn't a core chat/lifecycle type; it returns
+# True if it consumed the message. Core chat + auth logic is untouched.
+_msg_handler = None
+
+
+def set_message_handler(fn) -> None:
+    global _msg_handler
+    _msg_handler = fn
+
+
 def send_chat(conn, message: str) -> bool:
     """Serialize ``message`` as one NDJSON chat line and send it on ``conn``.
     Returns True on success. Never raises."""
     try:
         line = json.dumps({"type": "chat", "msg": message}) + "\n"
-        conn.sendall(line.encode("utf-8"))
+        safe_sendall(conn, line.encode("utf-8"))
         return True
     except Exception:
         return False
@@ -346,7 +374,17 @@ def run_chat_loop(conn, peer, log) -> None:
                     log("[CHAT RECEIVED] {}".format(text) if _DEBUG else "[CHAT RECEIVED]")
                     HUB.push("chat", peer=peer, msg=text)
                 else:
-                    log("[IGNORED] {} -- unknown type '{}'".format(peer, mtype))
+                    # offer non-chat types to a registered extension handler
+                    # (e.g. file transfer). Falls through to [IGNORED] only if
+                    # nothing consumes it -- chat behaviour is unchanged.
+                    handled = False
+                    if _msg_handler is not None:
+                        try:
+                            handled = bool(_msg_handler(msg, conn, peer, log))
+                        except Exception:
+                            handled = False
+                    if not handled:
+                        log("[IGNORED] {} -- unknown type '{}'".format(peer, mtype))
     except Exception as e:
         log("[DISCONNECTED] {} -- {}".format(peer, type(e).__name__))
     finally:
