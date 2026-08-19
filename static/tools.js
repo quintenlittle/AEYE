@@ -72,6 +72,21 @@
       'run shell commands, or fix dependencies — no such tools exist. If a task needs an uninstalled',
       'dependency, say so plainly and STOP; do not retry.',
       '',
+      'PLANNING (REQUIRED before ANY write/move/delete/create/run/install): FIRST reply with a plain-text',
+      'plan and NO tool call, in EXACTLY this form — numbered 1..N, at most 5 steps, no duplicate steps,',
+      'and every file step must name its file path:',
+      '[PLAN]',
+      '1. preview_diff notes.txt',
+      '2. write notes.txt',
+      'ONE step = ONE tool call. After the plan, execute one step per reply. Read-only tools',
+      '(read_file, list_files, preview_diff, check_code) may be used any time.',
+      'EDITING EXISTING FILES: make preview_diff its OWN step BEFORE the write step — call',
+      'preview_diff(path,new_content), review the diff, then write_file with the same path (the file must',
+      'be unchanged since the preview). Creating a brand-new file needs no diff.',
+      'DELETES: delete_file must be its own single-purpose plan step.',
+      'TOOL RESULTS ARE AUTHORITATIVE: never restate, reformat or reinterpret a [TOOL RESULT]; just use it',
+      'to decide your next action or final answer.',
+      '',
       'Available tools:',
       lines,
     ].join('\n');
@@ -130,6 +145,61 @@
   // a write/exec call needs confirmation when approval == "confirm"
   function needsConfirm(call) {
     return approval() === 'confirm' && call && call.access !== 'read';
+  }
+
+  // tools that MUTATE state -> require a plan + are step-matched (Phase 1/3)
+  const MUTATORS = new Set(['write_file', 'move_file', 'delete_file',
+    'create_directory', 'run_command', 'pip_install']);
+  const isMutator = (name) => MUTATORS.has(name);
+
+  // Parse + VALIDATE a [PLAN] block (Phase 2). Returns:
+  //   null            -> no plan present
+  //   {error}         -> a plan was written but is invalid
+  //   {steps}         -> a valid plan
+  function parsePlan(text) {
+    if (!enabled() || !text) return null;
+    const m = text.match(/\[\s*plan\s*\]([\s\S]*)/i);
+    if (!m) return null;
+    const nums = [], steps = [];
+    const re = /^\s*(\d+)[.)]\s+(.+?)\s*$/gm;
+    let s;
+    while ((s = re.exec(m[1]))) { nums.push(parseInt(s[1], 10)); steps.push(s[2].trim()); }
+    if (!steps.length) return { error: 'Plan is empty. Use [PLAN] then numbered steps.' };
+    if (steps.length > 5) return { error: 'Plan has too many steps (max 5).' };
+    for (let i = 0; i < nums.length; i++)
+      if (nums[i] !== i + 1) return { error: 'Plan steps must be sequentially numbered 1..N.' };
+    const seen = new Set();
+    for (const st of steps) {
+      const k = st.toLowerCase();
+      if (seen.has(k)) return { error: 'Plan contains duplicate identical steps.' };
+      seen.add(k);
+    }
+    // a step describing a file mutation must reference a path (has an extension or a slash)
+    const fileVerb = /\b(write|create|edit|update|save|move|rename|delete|remove|append)\b/i;
+    for (const st of steps)
+      if (fileVerb.test(st) && !/[./\\]/.test(st))
+        return { error: 'Each file operation step must reference an explicit file path.' };
+    return { steps };
+  }
+
+  // Does a tool call plausibly match a plan step's intent? (Phase 3, path-first)
+  function stepMatches(stepText, call) {
+    const s = (stepText || '').toLowerCase();
+    const paths = [call.args && call.args.path, call.args && call.args.path_from,
+      call.args && call.args.path_to].filter(Boolean).map((p) => String(p).toLowerCase());
+    for (const p of paths) {
+      const base = p.split(/[\\/]/).pop();
+      if (base && (s.includes(base) || s.includes(p))) return true;
+    }
+    if (s.includes(call.name)) return true;
+    const verbs = {
+      write_file: ['write', 'create', 'save', 'add', 'update', 'edit', 'append'],
+      move_file: ['move', 'rename'], delete_file: ['delete', 'remove'],
+      create_directory: ['create', 'directory', 'folder', 'mkdir'],
+      run_command: ['run', 'execute'], pip_install: ['install', 'pip', 'package', 'dependency'],
+    };
+    for (const v of (verbs[call.name] || [])) if (s.includes(v)) return true;
+    return false;
   }
 
   // run a tool and return the {success, output, error} CONTRACT, fed back to the
@@ -204,8 +274,8 @@
   }
 
   window.TOOLS = { enabled, mode, approval, refresh, setConfig, systemPrompt,
-    detect, run, needsConfirm, looksFaked, isEnvError, errKey, forbidden,
-    list: () => tools, config: () => cfg };
+    detect, parsePlan, stepMatches, isMutator, run, needsConfirm, looksFaked,
+    isEnvError, errKey, forbidden, list: () => tools, config: () => cfg };
 
   if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', () => { refresh(); });

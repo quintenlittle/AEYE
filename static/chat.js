@@ -574,6 +574,9 @@
     // agent-loop stability: stop on repeated identical failures / env errors /
     // identical repeated calls
     let lastToolErr = null, sameErrCount = 0, lastCallSig = null;
+    // PHASE 4/13 -- context state (internal; drives planning + progress)
+    const agent = { plan: [], step: 0, planCount: 0, touched: new Set(),
+                    completed: [], failed: [], lastResult: null, opsPerFile: {} };
     const stopAgent = (out, msg) => {           // safe exit: show msg, no more loops
       if (out) out.body.textContent = msg;
       state.messages.push({ role: 'assistant', content: msg });
@@ -652,6 +655,34 @@
         // strict tool-call detection: a valid call, a malformed attempt, or null
         // (plain prose = final answer). Mirrors the web branch structure.
         const tcall = toolsOn ? TOOLS.detect(acc) : null;
+
+        // PHASE 1/2 -- PLANNING: a [PLAN] reply (no tool call) is VALIDATED and
+        // recorded before execution, then we drive the model through it.
+        if (toolsOn && !tcall && !agent.step) {
+          const p = TOOLS.parsePlan(acc);
+          if (p && p.error && agent.planCount < 3) {          // invalid plan -> reject
+            agent.planCount++;
+            out.body.textContent = '';
+            webChip(out.div, '🧠 invalid plan', 'rejected');
+            work.push({ role: 'assistant', content: acc });
+            work.push({ role: 'user', content: '[PLAN ERROR]\n'
+              + JSON.stringify({ success: false, error: p.error }) });
+            EYE.setState('thinking', '◉ AEYE IS PLANNING…');
+            continue;
+          }
+          if (p && p.steps && agent.planCount < 3) {           // valid plan -> record
+            agent.plan = p.steps; agent.planCount++;
+            out.body.textContent = '';
+            webChip(out.div, '🧠 plan · ' + p.steps.length + ' step' + (p.steps.length === 1 ? '' : 's'),
+              p.steps.map((s, i) => (i + 1) + '. ' + s).join('\n'));
+            work.push({ role: 'assistant', content: acc });
+            work.push({ role: 'user', content: '[SYSTEM] Plan recorded (' + p.steps.length
+              + ' steps). Now execute step 1 with a SINGLE raw-JSON tool call. Do not repeat the plan.' });
+            EYE.setState('thinking', '◉ AEYE IS PLANNING…');
+            continue;
+          }
+        }
+
         if (tcall) {
           // LOOP CONTROL: hard cap of MAX_TOOL_CALLS per user turn
           if (toolCalls >= MAX_TOOL_CALLS) {
@@ -682,6 +713,51 @@
           }
           lastCallSig = sig;
 
+          const mutating = TOOLS.isMutator(tcall.name);
+
+          // PHASE 1 -- HARD plan enforcement: no mutation without a valid plan
+          if (mutating && !agent.plan.length) {
+            out.body.textContent = '';
+            webChip(out.div, '🧠 plan required', 'rejected');
+            const key = 'noplan';
+            if (key === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = key; }
+            if (sameErrCount >= 2) { stopAgent(out, 'Execution stopped: repeated failure detected.'); break; }
+            work.push({ role: 'user', content: '[TOOL RESULT]\n' + JSON.stringify({
+              success: false, output: null, error: 'Plan required before file operations' }) });
+            EYE.setState('thinking', '◉ AEYE IS PLANNING…');
+            continue;
+          }
+
+          // PHASE 3 -- execution enforcement: a mutation must match its plan step
+          if (mutating && agent.plan.length) {
+            const cur = agent.plan[Math.min(agent.step, agent.plan.length - 1)] || '';
+            if (!TOOLS.stepMatches(cur, tcall)) {
+              out.body.textContent = '';
+              webChip(out.div, '⏱ step mismatch', 'rejected');
+              const key = 'stepmismatch:' + TOOLS.errKey(cur);
+              if (key === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = key; }
+              if (sameErrCount >= 2) { stopAgent(out, 'Execution stopped: repeated failure detected.'); break; }
+              work.push({ role: 'user', content: '[TOOL RESULT]\n' + JSON.stringify({
+                success: false, output: null,
+                error: 'Step does not match plan (expected: "' + cur + '")' }) });
+              EYE.setState('thinking');
+              continue;
+            }
+          }
+
+          // PHASE 11 -- redundancy control: cap mutations per file per turn
+          if (mutating && tcall.args) {
+            const fpath = tcall.args.path || tcall.args.path_to || tcall.args.path_from;
+            if (fpath) {
+              const n = (agent.opsPerFile[fpath] || 0) + 1;
+              agent.opsPerFile[fpath] = n;
+              if (n > 3) {
+                stopAgent(out, 'Redundant operation detected on ' + fpath + '.');
+                break;
+              }
+            }
+          }
+
           // "confirm" approval: a write/exec tool needs an explicit yes
           if (TOOLS.needsConfirm(tcall)) {
             out.body.textContent = '';
@@ -699,20 +775,27 @@
             }
           }
 
-          // USER FEEDBACK + run the tool
+          // USER FEEDBACK (step-aware) + run the tool
           out.body.textContent = '';
           const fill = webChip(out.div, tcall.label, 'running…');
-          EYE.setState('refreshing', '◉ AEYE IS USING TOOLS…');
+          EYE.setState('refreshing', agent.plan.length
+            ? '◉ AEYE IS EXECUTING STEP ' + Math.min(agent.step + 1, agent.plan.length) + '/' + agent.plan.length + '…'
+            : '◉ AEYE IS USING TOOLS…');
+          // track touched files (Phase 3/4) from any file-tool path argument
+          if (tcall.args && tcall.args.path) agent.touched.add(String(tcall.args.path));
           const res = await TOOLS.run(tcall);
           fill(res.display);
+          agent.lastResult = res;
 
           if (!res.ok) {
+            agent.failed.push({ step: agent.step + 1, tool: tcall.name, error: res.error });
             // ENVIRONMENT/DEPENDENCY error -> unfixable with file tools, stop
             if (TOOLS.isEnvError(res.error)) {
               stopAgent(out, 'Dependency or environment issue. Cannot be resolved with file tools.');
               break;
             }
             // REPEAT FAILURE -- same normalized error twice in a row -> stop
+            // (this gives exactly one retry with an adjusted approach, then stop)
             const key = TOOLS.errKey(res.error);
             if (key && key === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = key; }
             if (sameErrCount >= 2) {
@@ -721,6 +804,8 @@
             }
           } else {
             lastToolErr = null; sameErrCount = 0;   // a success breaks the streak
+            agent.completed.push({ step: agent.step + 1, tool: tcall.name });
+            if (agent.plan.length) agent.step = Math.min(agent.step + 1, agent.plan.length);
           }
 
           work.push({ role: 'user', content: res.message });

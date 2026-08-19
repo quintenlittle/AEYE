@@ -627,6 +627,7 @@
     if ($('tool-enabled')) $('tool-enabled').checked = !!cfg.enabled;
     if ($('tool-mode')) $('tool-mode').value = cfg.mode || 'read';
     if ($('tool-approval')) $('tool-approval').value = cfg.approval || 'auto';
+    if ($('tool-dryrun')) $('tool-dryrun').checked = !!cfg.dry_run;
     if ($('tool-root') && document.activeElement !== $('tool-root'))
       $('tool-root').value = cfg.root || '';
   }
@@ -645,6 +646,8 @@
     $('tool-mode').addEventListener('change', (e) => pushToolCfg({ mode: e.target.value }, 'mode: ' + e.target.value));
   if ($('tool-approval'))
     $('tool-approval').addEventListener('change', (e) => pushToolCfg({ approval: e.target.value }, 'approval: ' + e.target.value));
+  if ($('tool-dryrun'))
+    $('tool-dryrun').addEventListener('change', (e) => pushToolCfg({ dry_run: e.target.checked }, e.target.checked ? 'dry run ON' : 'dry run off'));
   if ($('tool-root-save'))
     $('tool-root-save').addEventListener('click', () => pushToolCfg({ root: ($('tool-root').value || '').trim() }, 'workspace set'));
   // refresh the config panel whenever the plugins tab is opened

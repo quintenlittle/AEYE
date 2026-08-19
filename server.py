@@ -2750,9 +2750,25 @@ def _truncate(s) -> str:
     return s if len(s) <= _TOOL_OUT_MAX else s[:_TOOL_OUT_MAX] + "\n[TRUNCATED]"
 
 
-def _ok(output) -> dict:
-    """Structured success per the tool output contract."""
-    return {"success": True, "output": _truncate(output), "error": None}
+def _ok(output, meta=None) -> dict:
+    """Structured success per the tool output contract (optional meta block)."""
+    r = {"success": True, "output": _truncate(output), "error": None}
+    if meta is not None:
+        r["meta"] = meta
+    return r
+
+
+def _file_hash(fp: str):
+    """SHA-256 of a file's bytes, or None if it can't be read."""
+    try:
+        import hashlib
+        h = hashlib.sha256()
+        with open(fp, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
 
 
 def _err(msg) -> dict:
@@ -2779,7 +2795,7 @@ def _agent_default_root() -> str:
 
 
 _agent_cfg = {"enabled": False, "mode": "read", "approval": "auto",
-              "root": _agent_default_root(), "debug": False}
+              "root": _agent_default_root(), "debug": False, "dry_run": False}
 
 
 def _tool_log(kind: str, **kw) -> None:
@@ -2798,7 +2814,7 @@ def _agent_cfg_load():
     try:
         with open(_AGENT_CFG_FILE, encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("enabled", "mode", "approval", "root", "debug"):
+        for k in ("enabled", "mode", "approval", "root", "debug", "dry_run"):
             if k in d:
                 _agent_cfg[k] = d[k]
     except Exception:
@@ -2851,18 +2867,73 @@ _BUILTIN_TOOLS = [
      "description": "Read and return the text contents of a file in the workspace.",
      "args": [{"name": "path", "type": "path", "required": True,
                "description": "File to read, relative to the workspace root."}]},
+    {"name": "preview_diff", "access": "read", "source": "builtin",
+     "description": "Preview a unified diff between a file's current contents and proposed new content. REQUIRED before overwriting an existing file. Returns meta with the file hash.",
+     "args": [{"name": "path", "type": "path", "required": True,
+               "description": "File to preview changes for, relative to the workspace root."},
+              {"name": "new_content", "type": "string", "required": True,
+               "description": "The proposed new full contents of the file."}]},
+    {"name": "check_code", "access": "read", "source": "builtin",
+     "description": "Validate the SYNTAX of a code file without running it (Python via ast, JS via node --check).",
+     "args": [{"name": "path", "type": "path", "required": True,
+               "description": "Code file to syntax-check, relative to the workspace root."}]},
     {"name": "write_file", "access": "write", "source": "builtin",
-     "description": "Create or overwrite a text file in the workspace with the given content.",
+     "description": "Create or overwrite a text file. To OVERWRITE an existing file you MUST call preview_diff for that path first (its hash must still match); creating a new file needs no diff.",
      "args": [{"name": "path", "type": "path", "required": True,
                "description": "File to write, relative to the workspace root."},
               {"name": "content", "type": "string", "required": True,
                "description": "The full text to write into the file."}]},
+    {"name": "move_file", "access": "write", "source": "builtin",
+     "description": "Move or rename a file within the workspace. Source must exist; destination must not overwrite an existing file.",
+     "args": [{"name": "path_from", "type": "path", "required": True,
+               "description": "Existing file to move, relative to the workspace root."},
+              {"name": "path_to", "type": "path", "required": True,
+               "description": "Destination path, relative to the workspace root."}]},
+    {"name": "create_directory", "access": "write", "source": "builtin",
+     "description": "Create a directory in the workspace (will not overwrite an existing file).",
+     "args": [{"name": "path", "type": "path", "required": True,
+               "description": "Directory to create, relative to the workspace root."}]},
+    {"name": "delete_file", "access": "write", "source": "builtin",
+     "description": "Delete a single file in the workspace. STRICTLY GUARDED: must be its own explicit plan step.",
+     "args": [{"name": "path", "type": "path", "required": True,
+               "description": "File to delete, relative to the workspace root."}]},
+    {"name": "run_command", "access": "exec", "source": "builtin",
+     "description": "Run ONLY `python <script>` or `node <script>` inside the workspace (no shell chaining, 10s timeout).",
+     "args": [{"name": "cmd", "type": "string", "required": True,
+               "description": "e.g. 'python script.py' or 'node app.js' -- script must be in the workspace."}]},
+    {"name": "pip_install", "access": "exec", "source": "builtin",
+     "description": "Install a Python package into the workspace's ISOLATED .venv only (never system Python).",
+     "args": [{"name": "package", "type": "string", "required": True,
+               "description": "Package name, optionally pinned (e.g. requests==2.31.0)."}]},
 ]
+
+# diff-gate: an overwrite of an EXISTING file is only allowed after preview_diff
+# for that exact resolved path AND the file hash must still match. preview_diff
+# records (timestamp, hash) here; write_file verifies + consumes it.
+_DIFF_TTL = 600.0                     # a preview is valid for 10 min
+_diff_ok = {}                         # resolved_path -> (timestamp, hash_at_preview)
+_PKG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}(\[[A-Za-z0-9,._-]+\])?"
+                     r"(==[A-Za-z0-9._-]+)?$")
+
+
+def _dry() -> bool:
+    return bool(_agent_cfg.get("dry_run"))
+
+
+def _venv_python() -> str:
+    """The workspace .venv interpreter path (may not exist yet)."""
+    root = _agent_root()
+    for rel in ("Scripts/python.exe", "bin/python", "bin/python3"):
+        p = os.path.join(root, ".venv", *rel.split("/"))
+        if os.path.isfile(p):
+            return p
+    return ""
 
 
 def _builtin_run(name: str, args: dict) -> dict:
-    """Run a built-in file tool. Paths go through _confine (safe_path). Always
-    returns the {success, output, error} contract."""
+    """Run a built-in tool. Paths go through _confine (safe_path). Always returns
+    the {success, output, error} contract. Mutating tools honour dry_run."""
+    dry = _dry()
     if name == "list_files":
         d = _confine(args.get("path") or ".")
         if not os.path.isdir(d):
@@ -2874,6 +2945,7 @@ def _builtin_run(name: str, args: dict) -> dict:
         rel = os.path.relpath(d, _agent_root())
         return _ok("Contents of {}:\n{}".format(
             rel if rel != "." else "(workspace root)", "\n".join(rows) or "(empty)"))
+
     if name == "read_file":
         fp = _confine(args["path"])
         if not os.path.isfile(fp):
@@ -2881,15 +2953,197 @@ def _builtin_run(name: str, args: dict) -> dict:
         with open(fp, "rb") as f:
             data = f.read(_TOOL_OUT_MAX * 4 + 1)
         return _ok(data.decode("utf-8", "replace"))
+
+    if name == "preview_diff":
+        import difflib
+        fp = _confine(args["path"])
+        rel = os.path.relpath(fp, _agent_root())
+        new_text = str(args.get("new_content", ""))
+        exists = os.path.isfile(fp)
+        fhash = _file_hash(fp) if exists else None
+        # record (time, hash) so a matching write_file may overwrite (dry_run too)
+        _diff_ok[fp] = (time.time(), fhash)
+        meta = {"path": rel, "exists": exists, "hash": fhash}
+        if not exists:
+            return _ok("[new file: {}] no existing content -- write_file will create it "
+                       "({} bytes).".format(rel, len(new_text)), meta=meta)
+        with open(fp, "r", encoding="utf-8", errors="replace") as f:
+            old_text = f.read()
+        if old_text == new_text:
+            return _ok("[no changes] proposed content is identical to {}.".format(rel), meta=meta)
+        diff = difflib.unified_diff(
+            old_text.splitlines(), new_text.splitlines(),
+            fromfile="a/" + rel, tofile="b/" + rel, lineterm="")
+        return _ok("\n".join(diff), meta=meta)
+
+    if name == "check_code":
+        fp = _confine(args["path"])
+        if not os.path.isfile(fp):
+            return _err("no such file: {}".format(args["path"]))
+        ext = os.path.splitext(fp)[1].lower()
+        if ext == ".py":
+            import ast
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    ast.parse(f.read())
+                return _ok("OK: {} is valid Python syntax.".format(args["path"]))
+            except SyntaxError as e:
+                return {"success": False, "output": None,
+                        "error": "syntax error: line {}: {}".format(e.lineno, e.msg)}
+        if ext in (".js", ".mjs", ".cjs"):
+            try:
+                proc = subprocess.run(["node", "--check", fp], capture_output=True,
+                                      text=True, timeout=10, creationflags=NOWIN)
+                if proc.returncode == 0:
+                    return _ok("OK: {} is valid JavaScript syntax.".format(args["path"]))
+                return {"success": False, "output": None,
+                        "error": "syntax error: " + _sanitize_err(proc.stderr)}
+            except FileNotFoundError:
+                return _err("node is not installed -- cannot syntax-check JavaScript")
+            except subprocess.TimeoutExpired:
+                return _err("syntax check timed out")
+        return _err("no syntax validator for '{}' files".format(ext or "?"))
+
     if name == "write_file":
         fp = _confine(args["path"])
         content = str(args.get("content", ""))
+        if os.path.isfile(fp):
+            rec = _diff_ok.get(fp)
+            if not rec or (time.time() - rec[0]) > _DIFF_TTL:
+                return _err("preview_diff required before overwriting an existing file. "
+                            "Call preview_diff with the same path first, then write_file.")
+            if rec[1] != _file_hash(fp):
+                _diff_ok.pop(fp, None)
+                return _err("File changed since preview. Re-run preview_diff.")
+            if not dry:
+                _diff_ok.pop(fp, None)           # consume only on a real write
+        if dry:
+            return _ok("[dry-run] would write {} bytes to {}".format(
+                len(content), os.path.relpath(fp, _agent_root())))
         os.makedirs(os.path.dirname(fp) or _agent_root(), exist_ok=True)
         with open(fp, "w", encoding="utf-8", newline="") as f:
             f.write(content)
         return _ok("Wrote {} bytes to {}".format(
             len(content), os.path.relpath(fp, _agent_root())))
+
+    if name == "move_file":
+        src = _confine(args["path_from"])
+        dst = _confine(args["path_to"])
+        if not os.path.isfile(src):
+            return _err("source file does not exist: {}".format(args["path_from"]))
+        if os.path.exists(dst):
+            return _err("destination already exists: {}".format(args["path_to"]))
+        if dry:
+            return _ok("[dry-run] would move {} -> {}".format(args["path_from"], args["path_to"]))
+        os.makedirs(os.path.dirname(dst) or _agent_root(), exist_ok=True)
+        os.replace(src, dst)
+        return _ok("Moved {} -> {}".format(args["path_from"], args["path_to"]))
+
+    if name == "create_directory":
+        d = _confine(args["path"])
+        if os.path.isfile(d):
+            return _err("a file already exists at that path: {}".format(args["path"]))
+        if dry:
+            return _ok("[dry-run] would create directory {}".format(args["path"]))
+        os.makedirs(d, exist_ok=True)
+        return _ok("Created directory {}".format(args["path"]))
+
+    if name == "delete_file":
+        fp = _confine(args["path"])
+        if not os.path.isfile(fp):
+            return _err("no such file: {}".format(args["path"]))
+        if dry:
+            return _ok("[dry-run] would delete {}".format(args["path"]))
+        os.remove(fp)
+        return _ok("Deleted {}".format(args["path"]))
+
+    if name == "run_command":
+        return _run_command(str(args.get("cmd", "")), dry)
+
+    if name == "pip_install":
+        return _pip_install(str(args.get("package", "")), dry)
+
     return _err("unknown built-in tool")
+
+
+def _run_command(cmd: str, dry: bool) -> dict:
+    """ALLOWLIST-only runner: `python <script>` or `node <script>` inside the
+    sandbox root. No shell, no chaining, 10s cap, sanitized output."""
+    cmd = (cmd or "").strip()
+    if any(ch in cmd for ch in ("&", "|", ";", ">", "<", "`", "$", "\n", "\r")):
+        return _err("command chaining/redirection is not allowed")
+    parts = cmd.split()
+    if len(parts) < 2:
+        return _err("only 'python <script>' or 'node <script>' are allowed")
+    runner = parts[0].lower()
+    if runner not in ("python", "python3", "node"):
+        return _err("only python or node scripts may be run")
+    try:
+        script = _confine(parts[1])               # script must live in the sandbox
+    except ValueError as e:
+        return _err(str(e))
+    if not os.path.isfile(script):
+        return _err("script not found in workspace: {}".format(parts[1]))
+    exe = runner
+    if runner in ("python", "python3"):
+        exe = _venv_python() or ("python" if os.name == "nt" else "python3")
+    argv = [exe, script] + parts[2:]
+    if dry:
+        return _ok("[dry-run] would run: {} {}".format(runner, " ".join(parts[1:])))
+    try:
+        env = dict(os.environ)                    # copy -- never mutate the real env
+        proc = subprocess.run(argv, cwd=_agent_root(), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=10,
+                              env=env, creationflags=NOWIN)
+        out = proc.stdout or ""
+        if proc.returncode != 0:
+            return {"success": False, "output": _truncate(out) if out else None,
+                    "error": _sanitize_err(proc.stderr or "exited with code {}".format(proc.returncode))}
+        return _ok(out or "(no output)")
+    except subprocess.TimeoutExpired:
+        return _err("command timed out (10s limit)")
+    except FileNotFoundError:
+        return _err("{} runtime not found".format(runner))
+    except Exception as e:
+        return _err(type(e).__name__)
+
+
+def _pip_install(package: str, dry: bool) -> dict:
+    """Install a package into the workspace's ISOLATED .venv only. Never touches
+    system Python or PATH."""
+    package = (package or "").strip()
+    if not _PKG_RE.match(package):
+        return _err("invalid package name")
+    root = _agent_root()
+    vpy = _venv_python()
+    if dry:
+        return _ok("[dry-run] would install '{}' into {}/.venv".format(package, os.path.basename(root)))
+    if not vpy:
+        # bootstrap an isolated venv with a base interpreter from PATH (this is a
+        # real python.exe, never the frozen AEYE.exe, so it's safe to use)
+        base = shutil.which("python") or shutil.which("python3")
+        if not base:
+            return _err("no base Python available to create the workspace .venv")
+        try:
+            subprocess.run([base, "-m", "venv", os.path.join(root, ".venv")],
+                           capture_output=True, text=True, timeout=120, creationflags=NOWIN)
+        except Exception:
+            return _err("could not create the workspace .venv")
+        vpy = _venv_python()
+        if not vpy:
+            return _err("could not create the workspace .venv")
+    try:
+        proc = subprocess.run([vpy, "-m", "pip", "install", package],
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=180, creationflags=NOWIN)
+        if proc.returncode != 0:
+            return {"success": False, "output": None,
+                    "error": _sanitize_err(proc.stderr or proc.stdout or "pip failed")}
+        return _ok("Installed '{}' into the workspace .venv.".format(package))
+    except subprocess.TimeoutExpired:
+        return _err("pip install timed out")
+    except Exception as e:
+        return _err(type(e).__name__)
 
 
 def _tool_registry() -> list:
@@ -3005,6 +3259,7 @@ class AgentCfgReq(BaseModel):
     approval: Optional[str] = None        # "auto" | "confirm"
     root: Optional[str] = None
     debug: Optional[bool] = None          # dev-only tool lifecycle logging
+    dry_run: Optional[bool] = None        # simulate mutations (no filesystem writes)
 
 
 class ToolRunReq(BaseModel):
@@ -3030,6 +3285,8 @@ def agent_tool_config_set(req: AgentCfgReq):
             _agent_cfg["root"] = str(req.root).strip()
         if req.debug is not None:
             _agent_cfg["debug"] = bool(req.debug)
+        if req.dry_run is not None:
+            _agent_cfg["dry_run"] = bool(req.dry_run)
         _agent_cfg_save()
     return {"ok": True, "config": dict(_agent_cfg), "root_resolved": _agent_root()}
 

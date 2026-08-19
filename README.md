@@ -420,26 +420,35 @@ and edit its manifest in the built-in editor.
 > It's **off by default** and confined to a folder you choose — but treat it as
 > experimental. Strong tool-capable models follow the format most reliably.
 
-Beyond user-typed triggers, a plugin can opt in as a **tool the LLM calls itself**.
-Turn on **Allow LLM Tool Access** in **Manage → Plugins**, pick a **permission
-mode** and a **workspace folder**, and the model can read and write files (and run
-your custom tools) to actually *do* things — not just talk about them.
+Beyond user-typed triggers, the model can call **tools itself** to actually *do*
+things — not just talk about them. Turn on **Allow LLM Tool Access** in
+**Manage → Plugins**, pick a **permission mode** and a **workspace folder**.
 
-- **Built-in file tools** work out of the box: `read_file`, `write_file`,
-  `list_files` — all confined to your workspace folder.
-- **Custom tools**: any plugin whose manifest declares `"type":"tool"` (with a
-  `description` and typed `args`) becomes callable by the model, reusing the same
-  plugin runner (Python **and** Node). A bundled **`word_count`** sample shows the shape.
-- **Permission modes** — **Read Only** (read/list) · **Read + Write** (+ create/edit) ·
-  **Autonomous** (all tools) — plus an optional **Confirm writes & exec** approval prompt.
-- **Guardrails**: strict JSON tool-call format, a hard filesystem sandbox (paths
+- **Plans first**: for any task that changes files, the model must produce a
+  numbered **`[PLAN]`** (≤5 steps) before it touches anything, then executes **one
+  step per tool call** — no un-planned writes.
+- **Diff-gated edits**: to change an existing file the model must call
+  **`preview_diff`** first (you see the unified diff); the write is refused unless
+  the file is still **hash-identical** to what was previewed.
+- **Built-in tools** (all confined to your workspace, structured results):
+  `read_file`, `write_file`, `list_files`, `preview_diff`, `check_code`
+  (syntax-only, never runs code), `move_file`, `create_directory`, `delete_file`
+  (guarded — own plan step), plus **Autonomous**-only `run_command`
+  (`python`/`node` scripts only, no shell chaining, 10 s cap) and `pip_install`
+  (into the workspace's isolated `.venv` only).
+- **Custom tools**: any plugin declaring `"type":"tool"` becomes callable, reusing
+  the same runner (Python **and** Node). A bundled **`word_count`** sample shows the shape.
+- **Permission modes** — **Read Only** · **Read + Write** · **Autonomous** — plus an
+  optional **Confirm writes & exec** prompt and a **Dry run** switch that simulates
+  every change without writing anything.
+- **Guardrails**: strict JSON-only tool calls, a hard filesystem sandbox (paths
   outside the root are rejected — no `..`, no drive-switching), per-turn call limits,
-  repeat-failure / duplicate-call / dependency-error stops, output caps, and a
-  structured `{success, output, error}` result contract. Sanitized errors only —
-  never raw stack traces.
+  step-match enforcement, repeat-failure / duplicate-call / redundant-op /
+  dependency-error stops, output caps, and a `{success, output, error}` contract.
+  Sanitized errors only — never raw stack traces.
 
-Off by default, everything is enforced **server-side**, and no files are ever
-deleted. The whole thing stays local — nothing leaves your machine.
+Off by default, everything is enforced **server-side**, deletion needs an explicit
+plan step, and nothing ever leaves your machine.
 
 ## Peer-to-peer (P2P)
 
