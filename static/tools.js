@@ -153,6 +153,15 @@
     if (forceAgent())
       return { mode: 'agent', reason: 'force_agent A/B override', request_class: 'forced-agent', explicit_paths };
     const t = String(text || '');
+    // A request that NAMES a registered non-file tool (e.g. "weather"), or clearly
+    // wants a specialized tool, must ENGAGE the tool loop -- otherwise it has no
+    // file keyword, routes SIMPLE, and the model's tool call is shown as text and
+    // never executed. Route to AGENT so the full tool set (incl. plugin tools) is
+    // advertised; read tools still run without a plan.
+    const namesTool = tools.some((x) => x.source !== 'builtin'
+      && new RegExp('\\b' + x.name.replace(/[_-]+/g, '[ _-]?') + '\\b', 'i').test(t));
+    if (namesTool || /\b(weather|forecast|temperature)\b/i.test(t))
+      return { mode: 'agent', reason: 'names a specialized/plugin tool', request_class: 'tool-intent', explicit_paths };
     if (!TOOLY.test(t) && !DANGER.test(t))
       return { mode: 'simple', reason: 'no file/tool keywords', request_class: 'interactive', explicit_paths };
     if (DANGER.test(t))
