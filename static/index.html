@@ -311,12 +311,16 @@ if (!localStorage.getItem('aeye-default-v3')) {
           <fieldset>
             <legend>Web access</legend>
             <div class="row">
-              <label class="chk" title="Let the model reach the internet: search the web and read specific pages for current information. OFF by default — turning it on is the only thing that ever sends data off this machine.">
-                <input id="web-enable" type="checkbox"> allow web search &amp; page fetch
+              <label>Web search policy
+                <select id="web-policy" title="OFF: fully offline. CALL: web_search is a normal tool the model must call explicitly. AUTO: also auto-searches clearly time-sensitive requests.">
+                  <option value="off">Off — no web access</option>
+                  <option value="call">Call — model-callable tool (no auto-search)</option>
+                  <option value="auto">Auto — call + auto-search fresh requests</option>
+                </select>
               </label>
             </div>
             <div class="mini-status" id="web-status"></div>
-            <div class="fieldset-hint">When on, the model can emit a search/fetch request that <em>this app</em> runs for it, then reads the results back and answers with citations. <strong>This is the only feature that leaves the machine</strong> — search queries and page URLs go to a third party (DuckDuckGo by default, no key needed; drop a Tavily/Brave/SerpAPI key in <code>web_keys.txt</code> for better results). Nothing is sent while this is off, and only the query/URL the model asks for is ever sent. Fetches to localhost/private hosts are blocked.</div>
+            <div class="fieldset-hint">The model reaches the internet only via the <code>web_search</code> and <code>fetch_url</code> tools that <em>this app</em> runs for it, then reads the results back and answers with citations. <strong>This is the only feature that leaves the machine</strong> — queries/URLs go to a third party (DuckDuckGo by default, no key needed; drop a Tavily/Brave/SerpAPI key in <code>web_keys.txt</code> for better results). <b>Off</b> = nothing is sent, fully offline. <b>Call</b> = the model must explicitly ask; the app never auto-searches. <b>Auto</b> = the app may also search on its own for clearly time-sensitive requests. A dedicated tool (weather, files, RSS) is always preferred over generic web search. Fetches to localhost/private hosts are blocked.</div>
           </fieldset>
           <fieldset id="ticker-box">
             <legend>Price tickers</legend>
@@ -903,7 +907,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/debug.js?v=1"></script>
 <script src="/static/eye.js?v=2"></script>
 <script src="/static/game.js?v=2"></script>
-<script src="/static/chat.js?v=13"></script>
+<script src="/static/chat.js?v=14"></script>
 <script src="/static/library.js?v=2"></script>
 <script src="/static/imagine.js?v=2"></script>
 <script src="/static/dream.js?v=2"></script>
@@ -912,13 +916,13 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/sysmon.js?v=2"></script>
 <script src="/static/memory.js?v=2"></script>
 <script src="/static/docs.js?v=2"></script>
-<script src="/static/web.js?v=2"></script>
+<script src="/static/web.js?v=3"></script>
 <script src="/static/ticker.js?v=6"></script>
 <script src="/static/boards.js?v=6"></script>
 <script src="/static/sidebar.js?v=4"></script>
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
-<script src="/static/plugins.js?v=8"></script>
+<script src="/static/plugins.js?v=9"></script>
 <script src="/static/tools.js?v=13"></script>
 <script src="/static/p2p.js?v=7"></script>
 <script src="/static/startup.js?v=2"></script>

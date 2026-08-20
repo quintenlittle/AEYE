@@ -590,10 +590,40 @@
     }
     const sysAll = [sys, webCtx, toolCtx, docCtx, memCtx].filter(Boolean).join('\n\n');
 
+    // WEB ROUTER: decide how the web tools participate this turn (conservative).
+    // Prefers a dedicated tool (weather/files/RSS) over generic web_search, gates
+    // on required user context (weather needs a city/state, never IP), and only
+    // AUTO policy lets the controller search on its own for time-sensitive asks.
+    let webRoute = { policy: 'off', decision: 'none' }, webAutoSearch = false;
+    if (window.WEB && WEB.enabled()) {
+      const pol = WEB.policy();
+      const explicit = WEB.explicitIntent(text);        // 'offline' | 'search' | null
+      const fresh = WEB.freshnessRequired(text);
+      const wantsWeather = /\b(weather|forecast|temperature|how (?:hot|cold)|is it (?:raining|snowing)|rain(?:ing)?|snow(?:ing)?)\b/i.test(text);
+      const hasWeatherTool = !!(window.TOOLS && TOOLS.enabled()
+        && (TOOLS.list() || []).some((t) => t.name === 'weather'));
+      const hasLocation = /,\s*[A-Za-z.]{2,}/.test(text) || /\b(in|for|at|near)\s+[A-Z][a-zA-Z]+/.test(text);
+      let decision, reason, specialized = null, reqPresent = true;
+      if (explicit === 'offline') { decision = 'offline'; reason = 'user asked to stay offline'; }
+      else if (wantsWeather && hasWeatherTool) {
+        specialized = 'weather';
+        if (hasLocation) { decision = 'specialized_tool'; reason = 'weather tool (location present)'; }
+        else { decision = 'ask_user'; reason = 'weather location missing'; reqPresent = false; }
+      } else if (explicit === 'search') { decision = 'web_search'; reason = 'user explicitly asked to search'; }
+      else if (pol === 'auto' && fresh) { decision = 'web_search'; reason = 'auto: freshness-dependent request'; }
+      else { decision = 'model_choice'; reason = pol === 'auto' ? 'no strong freshness signal — left to model' : 'call policy — model must ask explicitly'; }
+      webRoute = { policy: pol, intent: wantsWeather ? 'weather' : (explicit || (fresh ? 'fresh' : 'general')),
+        freshness_required: fresh, specialized_tool: specialized, required_args_present: reqPresent,
+        decision, reason };
+      // only AUTO policy auto-invokes; explicit user "search" is still model-driven in CALL
+      webAutoSearch = pol === 'auto' && decision === 'web_search';
+      if (window.DEBUG && DEBUG.enabled()) DEBUG.log('web', '[WEB ROUTER]', webRoute);
+    }
+
     // the loop's working transcript: state.messages plus any tool-call rounds.
     // tool exchanges live ONLY here (not state.messages) so the visible/saved
     // transcript stays clean -- just the user turn and the final answer.
-    const webOn = !!(window.WEB && WEB.enabled());
+    const webOn = !!(window.WEB && WEB.enabled()) && webRoute.decision !== 'offline';
     const toolsOn = !!(window.TOOLS && TOOLS.enabled()) && execMode !== 'simple';
     const work = state.messages.slice();
     const buildPayload = () => ({
@@ -688,6 +718,21 @@
       }, extra || {}));
     }
     const allSources = [];      // pages the web tools drew on -> "Sources" footer
+    // AUTO policy: proactively search a clearly freshness-dependent request so the
+    // model answers with fresh sources without having to ask first. (CALL never
+    // does this; the model must call web_search itself there.)
+    if (webAutoSearch && window.WEB) {
+      const outA = bubble('assistant', '');
+      const fillA = webChip(outA.div, '🔎 auto-search', 'searching…');
+      EYE.setState('refreshing', '◉ AEYE IS SEARCHING THE WEB…');
+      try {
+        const res = await WEB.run({ tool: 'web_search', query: text }, text);
+        if (res.sources && res.sources.length) allSources.push(...res.sources);
+        fillA(res.display);
+        work.push({ role: 'user', content: res.message });
+        if (window.DEBUG) DEBUG.log('web', '[WEB AUTO-SEARCH]', { sources: (res.sources || []).length });
+      } catch (e) { fillA('search failed: ' + e.message); }
+    }
     try {
       for (;;) {
         const out = bubble('assistant', '');
@@ -716,6 +761,7 @@
           work.push({ role: 'assistant', content: acc });
           EYE.setState('refreshing',
             call.tool === 'fetch_url' ? '◉ READING THE PAGE…' : '◉ SEARCHING THE WEB…');
+          if (window.DEBUG) DEBUG.log('web', '[WEB TOOL]', { tool: call.tool, via: 'model' });
           let result;
           // the user's original message is the relevance signal for ranked fetch
           try { result = await WEB.run(call, text); }

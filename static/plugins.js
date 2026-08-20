@@ -644,7 +644,14 @@
     tb.innerHTML = '';
     let reg = [];
     try { await TOOLS.refresh(); reg = TOOLS.list() || []; }
-    catch { if (st) st.textContent = 'tool registry unreachable'; return; }
+    catch { reg = []; }
+    // append the policy-gated web tools (a separate subsystem) so the arsenal is
+    // the ONE place showing everything the model can call.
+    if (window.WEB && WEB.toolInfo) {
+      try { reg = reg.concat(WEB.toolInfo().map((t) => Object.assign({ allowed: true }, t))); }
+      catch { /* web tools optional */ }
+    }
+    if (!reg.length) { if (st) st.textContent = 'tool registry unreachable'; return; }
     // display names for type:tool plugins come from the plugin manifest name
     const nameById = {};
     try { for (const p of await load()) nameById[p.id] = p.name; } catch { /* names optional */ }
@@ -667,7 +674,7 @@
       const tdTy = document.createElement('td');
       const tag = document.createElement('span');
       tag.className = 'plug-mode';
-      tag.textContent = t.source === 'builtin' ? 'built-in' : 'plugin';
+      tag.textContent = t.source === 'builtin' ? 'built-in' : (t.source === 'web' ? 'web' : 'plugin');
       tdTy.appendChild(tag);
 
       const tdA = document.createElement('td');
@@ -681,7 +688,8 @@
 
       const tdS = document.createElement('td');
       tdS.className = 'plug-cmd';
-      tdS.textContent = t.source === 'plugin' ? ('plugins/' + t.id + '/') : 'backend (server)';
+      tdS.textContent = t.source === 'plugin' ? ('plugins/' + t.id + '/')
+        : (t.source === 'web' ? 'web (network)' : 'backend (server)');
       tdS.title = tdS.textContent;
 
       const tdAct = document.createElement('td');
@@ -707,9 +715,11 @@
       } else {
         const lk = document.createElement('span');
         lk.className = 'plug-nodeps';
-        lk.textContent = 'authoritative';
-        lk.title = 'Enforced in the backend server — schema is shown, but the '
-          + 'enforcement is not user-editable (security boundary).';
+        lk.textContent = t.source === 'web' ? 'web policy' : 'authoritative';
+        lk.title = t.source === 'web'
+          ? 'A network tool gated by the Web search policy (Settings → Web access).'
+          : 'Enforced in the backend server — schema is shown, but the '
+            + 'enforcement is not user-editable (security boundary).';
         tdAct.appendChild(lk);
       }
 
