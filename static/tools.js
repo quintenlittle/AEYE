@@ -45,7 +45,9 @@
 
   async function refresh() {
     try {
-      const d = await (await fetch('/api/plugins/tools')).json();
+      // no-store: WebView2 caches GETs aggressively -- a stale cached registry
+      // was hiding newly-added tools (e.g. weather) from the model + the UI.
+      const d = await (await fetch('/api/plugins/tools', { cache: 'no-store' })).json();
       if (d && d.config) cfg = Object.assign(cfg, d.config, {
         root: d.root_resolved || d.config.root,
         root_valid: !!d.root_valid,

@@ -27,7 +27,7 @@
   async function load(force) {
     if (loaded && !force) return plugins;
     try {
-      const data = await (await fetch('/api/plugins/list')).json();
+      const data = await (await fetch('/api/plugins/list', { cache: 'no-store' })).json();
       plugins = data.plugins || [];
       loaded = true;
     } catch { plugins = []; }
