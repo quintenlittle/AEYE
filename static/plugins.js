@@ -597,13 +597,141 @@
       ? ok + ' plugin' + (ok === 1 ? '' : 's') + ' ready'
         + (ok < list.length ? ' · ' + (list.length - ok) + ' with errors' : '')
       : 'no plugins — drop a repo + aeye-plugin.json into the plugins/ folder';
+    // a plugin change (create/edit/delete/clone) can add/remove a type:tool -> keep
+    // the tool arsenal in sync so new tools appear here automatically.
+    if (typeof renderArsenal === 'function') renderArsenal();
+  }
+
+  // ---- tool arsenal: the model's full callable-tool registry ---------------
+  // Built-ins + every type:tool plugin, from the same /api/plugins/tools registry
+  // the model is driven by -- so Manage>Plugins shows the ACTUAL tool arsenal,
+  // not just filesystem plugins. Security stays backend-authoritative (built-ins
+  // are shown read-only); plugin tools remain fully editable via the code editor.
+  const MODE_LABEL = { read: 'Read Only', write: 'Read + Write', auto: 'Autonomous' };
+  const humanize = (n) => String(n || '').split('_')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
+
+  function toggleToolDetail(row, t, disp) {
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains('tool-detail')) { next.remove(); return; }
+    const tr = document.createElement('tr');
+    tr.className = 'tool-detail';
+    const td = document.createElement('td');
+    td.colSpan = 6;
+    const args = (t.args || []).length
+      ? (t.args || []).map((a) => '  • ' + a.name + ' (' + a.type
+          + (a.required === false ? ', optional' : ', required') + '): '
+          + (a.description || '')).join('\n')
+      : '  (no arguments)';
+    const src = t.source === 'plugin'
+      ? 'plugin — plugins/' + t.id + '/ (editable below)'
+      : 'built-in — enforced in the backend server (schema shown; not user-editable)';
+    td.textContent =
+      disp + '  {"tool":"' + t.name + '"}\n'
+      + 'type: ' + (t.source === 'builtin' ? 'built-in' : 'plugin')
+      + '   access: ' + t.access
+      + '   callable now: ' + (t.allowed ? 'yes' : 'no (blocked in ' + (MODE_LABEL[TOOLS.mode()] || TOOLS.mode()) + ' mode)') + '\n\n'
+      + (t.description || '(no description)') + '\n\narguments:\n' + args
+      + '\n\nsource: ' + src;
+    tr.appendChild(td);
+    row.after(tr);
+  }
+
+  async function renderArsenal() {
+    const st = $('arsenal-status');
+    const tb = $('arsenal-body');
+    if (!tb || !window.TOOLS) return;
+    tb.innerHTML = '';
+    let reg = [];
+    try { await TOOLS.refresh(); reg = TOOLS.list() || []; }
+    catch { if (st) st.textContent = 'tool registry unreachable'; return; }
+    // display names for type:tool plugins come from the plugin manifest name
+    const nameById = {};
+    try { for (const p of await load()) nameById[p.id] = p.name; } catch { /* names optional */ }
+
+    for (const t of reg) {
+      const tr = document.createElement('tr');
+      if (!t.allowed) tr.classList.add('tool-blocked');
+      const disp = t.source === 'plugin' ? (nameById[t.id] || humanize(t.name)) : humanize(t.name);
+
+      const tdN = document.createElement('td');
+      tdN.className = 'mem-title';
+      const nm = document.createElement('div');
+      nm.textContent = disp;
+      const code = document.createElement('code');
+      code.className = 'tool-trigname';
+      code.textContent = t.name;
+      tdN.append(nm, code);
+      if (t.description) tdN.title = t.description;
+
+      const tdTy = document.createElement('td');
+      const tag = document.createElement('span');
+      tag.className = 'plug-mode';
+      tag.textContent = t.source === 'builtin' ? 'built-in' : 'plugin';
+      tdTy.appendChild(tag);
+
+      const tdA = document.createElement('td');
+      tdA.textContent = t.access;
+
+      const tdArg = document.createElement('td');
+      tdArg.className = 'plug-cmd';
+      tdArg.textContent = (t.args || []).map((a) => a.name + (a.required === false ? '?' : '')).join(', ') || '—';
+      tdArg.title = (t.args || []).map((a) => a.name + ' (' + a.type
+        + (a.required === false ? ', optional' : '') + '): ' + (a.description || '')).join('\n');
+
+      const tdS = document.createElement('td');
+      tdS.className = 'plug-cmd';
+      tdS.textContent = t.source === 'plugin' ? ('plugins/' + t.id + '/') : 'backend (server)';
+      tdS.title = tdS.textContent;
+
+      const tdAct = document.createElement('td');
+      tdAct.className = 'plug-setup';
+      const det = document.createElement('button');
+      det.className = 'plug-edit';
+      det.textContent = 'details';
+      det.title = 'Show this tool\'s description, argument schema and source';
+      det.addEventListener('click', () => toggleToolDetail(tr, t, disp));
+      tdAct.appendChild(det);
+      if (t.source === 'plugin' && t.id) {
+        const ed = document.createElement('button');
+        ed.className = 'plug-edit';
+        ed.textContent = 'edit';
+        ed.title = 'Edit this tool plugin\'s manifest (hackable)';
+        ed.addEventListener('click', () => openEditor(t.id));
+        const cb = document.createElement('button');
+        cb.className = 'plug-edit';
+        cb.textContent = 'code';
+        cb.title = 'Edit this tool plugin\'s code';
+        cb.addEventListener('click', () => openEditor(t.id, undefined, true));
+        tdAct.append(ed, cb);
+      } else {
+        const lk = document.createElement('span');
+        lk.className = 'plug-nodeps';
+        lk.textContent = 'authoritative';
+        lk.title = 'Enforced in the backend server — schema is shown, but the '
+          + 'enforcement is not user-editable (security boundary).';
+        tdAct.appendChild(lk);
+      }
+
+      tr.append(tdN, tdTy, tdA, tdArg, tdS, tdAct);
+      tb.appendChild(tr);
+    }
+
+    if (st) {
+      const nOn = reg.filter((t) => t.allowed).length;
+      st.textContent = reg.length
+        ? reg.length + ' tool' + (reg.length === 1 ? '' : 's') + ' · ' + nOn
+          + ' callable in ' + (MODE_LABEL[TOOLS.mode()] || TOOLS.mode()) + ' mode'
+        : 'no tools in the registry';
+    }
   }
 
   // ---- events --------------------------------------------------------------
 
   // render when the plugins tab is opened
   document.querySelector('[data-tab="tab-plugins"]')
-    .addEventListener('click', render);
+    .addEventListener('click', () => { render(); renderArsenal(); });
+  if ($('arsenal-rescan')) $('arsenal-rescan').addEventListener('click', renderArsenal);
   $('plug-rescan').addEventListener('click', render);
   $('plug-clone').addEventListener('click', clone);
   $('plug-url').addEventListener('keydown', (e) => {
@@ -637,8 +765,11 @@
   };
   async function pushToolCfg(patch, msg) {
     if (!window.TOOLS) return;
-    try { await TOOLS.setConfig(patch); setToolStatus(msg || 'saved'); await loadToolCfg(); }
-    catch { setToolStatus('failed', true); }
+    try {
+      await TOOLS.setConfig(patch); setToolStatus(msg || 'saved'); await loadToolCfg();
+      // enabling/mode changes flip which tools are callable -> refresh the arsenal
+      renderArsenal();
+    } catch { setToolStatus('failed', true); }
   }
   if ($('tool-enabled'))
     $('tool-enabled').addEventListener('change', (e) =>

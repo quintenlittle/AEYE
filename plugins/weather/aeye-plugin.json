@@ -1,0 +1,13 @@
+{
+  "name": "Weather",
+  "trigger": "weather",
+  "type": "tool",
+  "access": "read",
+  "description": "Get the current weather for an EXPLICIT city/state (or city/country) location. The location is required and must come from the user -- NEVER infer it from IP/network, because Starlink/VPN/ISP egress can report the wrong city. If the user asks for weather without naming a place, ask 'What city and state are you in?' first; do not guess.",
+  "args": [
+    {"name": "location", "type": "string", "required": true,
+     "description": "City and state or country, e.g. 'Seminole, TX'. Required -- ask the user if unknown; never infer from IP."}
+  ],
+  "command": ["python", "weather.py", "{location}"],
+  "timeout": 20
+}

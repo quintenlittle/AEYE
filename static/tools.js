@@ -19,6 +19,30 @@
   const mode = () => cfg.mode || 'read';
   const approval = () => cfg.approval || 'auto';
 
+  // ---- config-persistence audit logging (Task 9; observation-only) ----------
+  // The backend already persists + restores the agent config; these surface the
+  // load/apply/activate transitions in Manage>Debug so "did my saved workspace
+  // come back without pressing Set?" is answerable without guessing.
+  const _dbg = (cat, ev, data) => { try { if (window.DEBUG) DEBUG.log(cat, ev, data); } catch { /* noop */ } };
+  const _cfgSnap = () => ({ enabled: !!cfg.enabled, permission: cfg.mode, approval: cfg.approval,
+    dry_run: !!cfg.dry_run, force_agent: !!cfg.force_agent, root: cfg.root,
+    root_valid: !!cfg.root_valid, root_active: !!cfg.root_active });
+  let _loadLogged = false;        // [AGENT CONFIG LOAD] once, at first sync (boot)
+  let _wasActive = null;          // track root_active transitions -> [WORKSPACE ACTIVATE]
+
+  function _auditAfterSync() {
+    if (!_loadLogged) {           // first authoritative read from the backend = the restored state
+      _loadLogged = true;
+      _dbg('agent', '[AGENT CONFIG LOAD]', _cfgSnap());
+    }
+    const active = !!cfg.root_active;
+    if (active !== _wasActive) {  // false->true (or true->false) is worth recording
+      _dbg('workspace', '[WORKSPACE ACTIVATE]', {
+        root: cfg.root, active, root_valid: !!cfg.root_valid, enabled: !!cfg.enabled });
+      _wasActive = active;
+    }
+  }
+
   async function refresh() {
     try {
       const d = await (await fetch('/api/plugins/tools')).json();
@@ -29,17 +53,20 @@
         root_active: !!(d.config.enabled && d.root_valid),
       });
       if (d && Array.isArray(d.tools)) tools = d.tools;
+      _auditAfterSync();
     } catch { /* keep last known */ }
     return { cfg, tools };
   }
 
   async function setConfig(patch) {
+    const before = _cfgSnap();
     const d = await (await fetch('/api/plugins/tool/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch || {}),
     })).json();
     if (d && d.config) cfg = Object.assign(cfg, d.config, { root: d.root_resolved || d.config.root });
     await refresh();
+    _dbg('agent', '[AGENT CONFIG APPLY]', { patch: patch || {}, before, after: _cfgSnap() });
     return cfg;
   }
 
@@ -47,10 +74,37 @@
   const byName = (n) => tools.find((t) => t.name === n) || null;
 
   // ---- system prompt (tools the model may call, given the current mode) -----
-  function argSig(t) {
-    return (t.args || []).map((a) =>
-      a.name + (a.required === false ? '?' : '')).join(', ');
+  // The registry is the SINGLE SOURCE OF TRUTH: the plugins UI, the tool schema,
+  // the model prompt, the generated JSON example and the backend validation all
+  // derive from the same per-tool `args` list -- no hand-duplicated definitions.
+
+  // Exact nested-JSON call shape for a tool, generated from its schema. This is
+  // the format the model must emit, e.g. {"tool":"read_file","args":{"path":"<path>"}}
+  function exampleCall(t) {
+    const a = {};
+    for (const arg of (t.args || [])) a[arg.name] = '<' + arg.name + '>';
+    return JSON.stringify({ tool: t.name, args: a });
   }
+
+  // A per-tool advertisement block. Every tool shows its EXACT CALL shape (the
+  // decisive fix: the model obeys the nested schema when shown it literally).
+  // compact=true (STANDARD) drops the prose/per-arg lines but KEEPS the CALL line.
+  function toolBlock(t, compact) {
+    const req = (t.args || []).filter((a) => a.required !== false).map((a) => a.name);
+    const opt = (t.args || []).filter((a) => a.required === false).map((a) => a.name);
+    const lines = ['TOOL: ' + t.name];
+    if (!compact && t.description) lines.push('  ' + t.description);
+    lines.push('  Required args: ' + (req.length ? req.join(', ') : '(none)')
+      + (opt.length ? '   Optional args: ' + opt.join(', ') : ''));
+    if (!compact)
+      for (const a of (t.args || []))
+        lines.push('    - ' + a.name + ' (' + a.type
+          + (a.required === false ? ', optional' : '') + '): ' + (a.description || ''));
+    lines.push('  CALL: ' + exampleCall(t));
+    return lines.join('\n');
+  }
+  const toolBlocks = (av, compact) => av.map((t) => toolBlock(t, compact)).join('\n\n');
+
   const forceAgent = () => !!cfg.force_agent;
 
   // STANDARD-mode tool subset (bounded single-file work). preview_diff is
@@ -71,31 +125,58 @@
   const TOOLY = /\b(file|files|read|open|show|display|view|cat|contents?|write|create|make|edit|modify|change|update|append|save|list|ls|folder|directory|dir|check|validate|syntax|preview|diff|workspace|script|code|\.(py|js|ts|jsx|json|md|txt|csv|html|css|ya?ml|sh|bat|ini|cfg|log))\b/i;
   const DANGER = /\b(delete|remove|rm\b|move|rename|run|execute|install|pip|package|dependency|npm|terminal|command|venv|environment|virtualenv)\b/i;
   const MULTI = /\b(files|multiple|several|each|every|all\s+the|both|project|across|three|two\s+files|then|after that|and then|refactor)\b/i;
-  function classifyMode(text) {
-    if (!enabled()) return 'simple';
-    if (forceAgent()) return 'agent';
+
+  // explicit file paths named in the request -- quoted tokens or bare filenames
+  // with a known extension. Used ONLY for router DEBUG context (Task 8), never to
+  // decide routing (that stays keyword-based + loop-enforced).
+  const _EXT = 'py|js|ts|jsx|json|md|txt|csv|html?|css|ya?ml|sh|bat|ini|cfg|log|xml|toml';
+  function explicitPaths(text) {
     const t = String(text || '');
-    if (!TOOLY.test(t) && !DANGER.test(t)) return 'simple';
-    if (DANGER.test(t) || MULTI.test(t)) return 'agent';
-    return 'standard';
+    const out = new Set();
+    let m;
+    const q = /["'`]([^"'`\n]{1,120})["'`]/g;               // quoted path/filename
+    while ((m = q.exec(t))) {
+      const s = m[1].trim();
+      if (new RegExp('\\.(?:' + _EXT + ')$', 'i').test(s) || /[\\/]/.test(s)) out.add(s);
+    }
+    const f = new RegExp('(?:^|[\\s(])([\\w.-]+\\.(?:' + _EXT + '))\\b', 'gi');  // bare file.ext
+    while ((m = f.exec(t))) out.add(m[1]);
+    return [...out].slice(0, 8);
   }
 
-  const toolLines = (av) => av.map((t) => {
-    const args = (t.args || []).map((a) =>
-      '    - ' + a.name + ' (' + a.type + (a.required === false ? ', optional' : '') + '): '
-      + (a.description || '')).join('\n');
-    return '- ' + t.name + '(' + argSig(t) + '): ' + (t.description || '')
-      + (args ? '\n' + args : '');
-  }).join('\n');
+  // Full routing decision WITH a human-readable reason + request_class + the
+  // explicit paths (Task 8 router context). classifyMode() is just its .mode.
+  function classifyInfo(text) {
+    const explicit_paths = explicitPaths(text);
+    if (!enabled())
+      return { mode: 'simple', reason: 'tool access disabled', request_class: 'interactive', explicit_paths };
+    if (forceAgent())
+      return { mode: 'agent', reason: 'force_agent A/B override', request_class: 'forced-agent', explicit_paths };
+    const t = String(text || '');
+    if (!TOOLY.test(t) && !DANGER.test(t))
+      return { mode: 'simple', reason: 'no file/tool keywords', request_class: 'interactive', explicit_paths };
+    if (DANGER.test(t))
+      return { mode: 'agent', reason: 'dangerous verb (delete/move/run/install)', request_class: 'dangerous-op', explicit_paths };
+    if (MULTI.test(t))
+      return { mode: 'agent', reason: 'multi-file / sequential signal', request_class: 'multi-file', explicit_paths };
+    return { mode: 'standard', reason: 'bounded single-file operation', request_class: 'file-op', explicit_paths };
+  }
+  function classifyMode(text) { return classifyInfo(text).mode; }
 
   // CORE rules -- always sent when tools are enabled (kept compact)
   const CORE = [
     'You can use TOOLS on files in the user’s workspace. Call ONE tool per reply as a single raw JSON',
     'object and nothing else: {"tool":"name","args":{...}} (a ```json fenced block is also accepted; no',
-    'XML, no other shape — malformed JSON is rejected). You then get a JSON [TOOL RESULT]',
-    '{"success":..,"output":..,"error":..} which is AUTHORITATIVE — never restate, reformat or invent a',
-    'result. Paths are relative to the workspace; anything outside it is rejected. When finished, reply in',
-    'plain prose with NO JSON.',
+    'XML, no other shape — malformed JSON is rejected).',
+    '',
+    'ALL tool arguments MUST be nested under "args" — NEVER beside "tool".',
+    '  CORRECT: {"tool":"read_file","args":{"path":"test.txt"}}',
+    '  WRONG:   {"tool":"read_file","path":"test.txt"}',
+    'Copy the exact CALL shape shown for each tool below and fill in the values.',
+    '',
+    'You then get a JSON [TOOL RESULT] {"success":..,"output":..,"error":..} which is AUTHORITATIVE —',
+    'never restate, reformat or invent a result. Paths are relative to the workspace; anything outside it',
+    'is rejected. When finished, reply in plain prose with NO JSON.',
   ];
 
   // modular system prompt by execution mode (Phase 6)
@@ -111,8 +192,8 @@
         'integrity, writes, and syntax-checks for you in one step. If you need the current contents before',
         'deciding the change, call read_file first. Do not call preview_diff yourself.',
         '',
-        'Available tools:',
-        toolLines(av),
+        'Available tools (copy the CALL shape exactly; all args go inside "args"):',
+        toolBlocks(av, true),
       ]).join('\n');
     }
     // AGENT mode
@@ -126,11 +207,21 @@
       '2. Write app.py.',
       'ONE step = ONE tool call. Never combine [PLAN] text and a tool JSON in one reply. Execute one step',
       'per reply. To edit an existing file: preview_diff(path,new_content) as its own step, then write_file',
-      'with the same path (unchanged since the preview). delete_file must be its own single-purpose step.',
+      'with the same path (unchanged since the preview).',
+      '',
+      'DELETING a file is NOT an edit: do NOT call preview_diff and do NOT write empty content first —',
+      'preview_diff/write_file are ONLY for changing a file. To delete, plan a verify-then-delete and call',
+      'delete_file directly (it needs no diff and no hash):',
+      '[PLAN]',
+      '1. Verify test2.txt exists.',
+      '2. Delete test2.txt.',
+      'then {"tool":"read_file","args":{"path":"test2.txt"}} then {"tool":"delete_file","args":{"path":"test2.txt"}}.',
+      'MOVING/renaming and CREATING a directory also need NO preview_diff — just plan the step and call',
+      'move_file / create_directory. delete_file must be its own single-purpose step.',
       'Stop as soon as the goal is achieved and any required validation passed.',
       '',
-      'Available tools:',
-      toolLines(av),
+      'Available tools (copy the CALL shape exactly; all args go inside "args"):',
+      toolBlocks(av, false),
     ]).join('\n');
   }
 
@@ -170,6 +261,15 @@
       const t = byName(name.trim());
       if (!t)
         return { malformed: true, error: 'Unknown tool "' + name.trim() + '". Available tools: ' + tools.map((x) => x.name).join(', ') + '.' };
+      // FLAT-ARGS GUARD (feedback only -- NO auto-repair, NO moving args): reject a
+      // call that placed arguments BESIDE "tool" instead of inside "args". Signal:
+      // "args" carries nothing, yet a top-level key matches a declared arg name.
+      if (!Object.keys(args).length) {
+        const declared = new Set((t.args || []).map((a) => a.name));
+        const misplaced = Object.keys(obj).filter((k) => k !== 'tool' && k !== 'args' && declared.has(k));
+        if (misplaced.length)
+          return { malformed: true, error: 'Malformed tool call: all arguments must be inside "args". Expected: ' + exampleCall(t) };
+      }
       const preview = (t.args || []).map((a) => {
         const v = args[a.name];
         return v == null ? null : a.name + '=' + String(v).slice(0, 40);
@@ -182,6 +282,33 @@
       return { malformed: true, error: 'Tool calls must be raw JSON, not XML. Reply with ONLY {"tool":"name","args":{...}}.' };
 
     return null;                                   // plain prose -> final answer
+  }
+
+  // ---- Task 7 diagnostics: expose exactly what detect() saw + the schema ------
+  // The ISOLATED candidate JSON string detect() would parse (or null) -- the same
+  // fence/brace extraction, so [TOOL CANDIDATE RAW] shows the precise text the
+  // parser received. Diagnostic only; never used for execution.
+  function rawCandidate(text) {
+    if (!text) return null;
+    const s = String(text).trim();
+    const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
+    let fm;
+    while ((fm = fenceRe.exec(s))) {
+      const c = fm[1].trim();
+      if (c[0] === '{') return c;
+    }
+    if (s[0] === '{') return s;
+    return null;
+  }
+
+  // Compact schema for one tool (or the whole advertised set for a mode): the
+  // arg contract the model was given, so a missing path can be traced to whether
+  // the model was even told the arg was required.
+  function schemaFor(name) {
+    const t = byName(name);
+    if (!t) return null;
+    return { tool: t.name, access: t.access, source: t.source,
+      args: (t.args || []).map((a) => ({ name: a.name, type: a.type, required: a.required !== false })) };
   }
 
   // a write/exec call needs confirmation when approval == "confirm"
@@ -316,9 +443,9 @@
   }
 
   window.TOOLS = { enabled, mode, approval, forceAgent, refresh, setConfig,
-    systemPrompt, classifyMode, toolsForMode, detect, parsePlan, stepMatches,
-    isMutator, run, needsConfirm, looksFaked, isEnvError, errKey, forbidden,
-    list: () => tools, config: () => cfg };
+    systemPrompt, classifyMode, classifyInfo, toolsForMode, detect, parsePlan,
+    stepMatches, isMutator, run, needsConfirm, looksFaked, isEnvError, errKey,
+    forbidden, rawCandidate, schemaFor, list: () => tools, config: () => cfg };
 
   if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', () => { refresh(); });

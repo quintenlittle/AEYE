@@ -2613,7 +2613,8 @@ def _plugin_load(pid: str, path: str) -> dict:
                 atype = "string"
             args.append({"name": an, "type": atype,
                          "description": str(a.get("description") or "")[:200],
-                         "required": bool(a.get("required", True))})
+                         "required": bool(a.get("required", True)),
+                         "allow_empty": bool(a.get("allow_empty", False))})
     base.update(name=str(m.get("name") or pid)[:80], trigger=trig[:60],
                 description=str(m.get("description") or "")[:300],
                 command=cmd if isinstance(cmd, list) else [],
@@ -2886,8 +2887,8 @@ _BUILTIN_TOOLS = [
      "description": "Preview a unified diff between a file's current contents and proposed new content. REQUIRED before overwriting an existing file. Returns meta with the file hash.",
      "args": [{"name": "path", "type": "path", "required": True,
                "description": "File to preview changes for, relative to the workspace root."},
-              {"name": "new_content", "type": "string", "required": True,
-               "description": "The proposed new full contents of the file."}]},
+              {"name": "new_content", "type": "string", "required": True, "allow_empty": True,
+               "description": "The proposed new full contents of the file (may be empty)."}]},
     {"name": "check_code", "access": "read", "source": "builtin",
      "description": "Validate the SYNTAX of a code file without running it (Python via ast, JS via node --check).",
      "args": [{"name": "path", "type": "path", "required": True,
@@ -2896,8 +2897,8 @@ _BUILTIN_TOOLS = [
      "description": "Create or overwrite a text file. To OVERWRITE an existing file you MUST call preview_diff for that path first (its hash must still match); creating a new file needs no diff.",
      "args": [{"name": "path", "type": "path", "required": True,
                "description": "File to write, relative to the workspace root."},
-              {"name": "content", "type": "string", "required": True,
-               "description": "The full text to write into the file."}]},
+              {"name": "content", "type": "string", "required": True, "allow_empty": True,
+               "description": "The full text to write into the file (may be empty to create/clear a file)."}]},
     {"name": "move_file", "access": "write", "source": "builtin",
      "description": "Move or rename a file within the workspace. Source must exist; destination must not overwrite an existing file.",
      "args": [{"name": "path_from", "type": "path", "required": True,
@@ -3181,17 +3182,29 @@ def _tool_by_name(name: str):
 
 
 def _validate_args(tool: dict, args: dict):
-    """Schema check BEFORE execution: required present + non-empty, correct type.
-    Returns (clean_args, error_message_or_None). Path args stay strings here;
-    confinement (safe_path) happens at execution."""
+    """Schema check BEFORE execution: required present, correct type. Returns
+    (clean_args, error_message_or_None). Path args stay strings here; confinement
+    (safe_path) happens at execution.
+
+    Empty-string handling (Task 5): a required argument that is MISSING/null is an
+    error, but a valid empty string "" is only rejected when the arg needs non-empty
+    text. An arg opts into accepting "" with `allow_empty: true` in its schema --
+    e.g. write_file.content / preview_diff.new_content, where emptying a file (or
+    previewing an empty new version) is a legitimate operation. All other required
+    args (paths, cmd, package, ...) still reject blank/whitespace-only values."""
     clean = {}
     for spec in tool.get("args", []):
         an = spec["name"]
         atype = spec.get("type", "string")
         req = spec.get("required", True)
+        allow_empty = bool(spec.get("allow_empty", False))
         v = args.get(an)
-        empty = v is None or (isinstance(v, str) and v.strip() == "")
-        if empty:
+        if allow_empty:
+            # "" is a real value; only a truly absent/null arg counts as missing
+            missing = v is None
+        else:
+            missing = v is None or (isinstance(v, str) and v.strip() == "")
+        if missing:
             if req:
                 return None, "missing or empty required argument '{}'".format(an)
             continue

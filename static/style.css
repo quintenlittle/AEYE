@@ -1081,6 +1081,15 @@ button.ghost { color: var(--sclera); }
   padding: 1px 5px; border: 1px solid var(--dim); border-radius: 8px;
   color: var(--sclera);
 }
+/* tool arsenal (Manage>Plugins): the model's full callable-tool registry */
+.tool-trigname { display: block; margin-top: 2px; font-size: 10px; color: var(--dim); }
+#arsenal-table tr.tool-blocked td { opacity: 0.45; }
+#arsenal-table tr.tool-detail td {
+  white-space: pre-wrap; font-size: 11px; line-height: 1.45;
+  color: var(--sclera); background: rgba(0,0,0,0.18);
+  border-top: 1px dashed var(--line); padding: 8px 10px; max-width: none;
+}
+
 /* composer while an interactive plugin session owns it */
 #input.plugin-session { border-color: var(--accent); box-shadow: 0 0 6px var(--accent); color: var(--fg); }
 .mem-title { color: var(--fg); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

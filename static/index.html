@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=25">
+<link rel="stylesheet" href="/static/style.css?v=26">
 </head>
 <body data-state="idle">
 <script>
@@ -507,6 +507,20 @@ if (!localStorage.getItem('aeye-default-v3')) {
             </div>
           </fieldset>
           <fieldset>
+            <legend>Tool arsenal &mdash; everything the model can call</legend>
+            <div class="fieldset-hint">Every built-in file tool <b>and</b> every <code>"type":"tool"</code> plugin available to the model, from one registry. Rows dim when the active <b>Permission mode</b> above blocks them. Built-ins are enforced in the backend server &mdash; their schema is shown but the enforcement isn't user-editable (that's the security boundary); plugin tools are fully hackable &mdash; hit <b>edit</b>/<b>code</b> to change them. New <code>"type":"tool"</code> plugins appear here automatically.</div>
+            <div class="plug-bar">
+              <span class="mini-status" id="arsenal-status" style="min-height:0"></span>
+              <button id="arsenal-rescan" type="button" title="Re-read the tool registry">rescan</button>
+            </div>
+            <div class="lib-wrap plug-wrap">
+              <table id="arsenal-table">
+                <thead><tr><th>tool</th><th>type</th><th>access</th><th>args</th><th>source</th><th></th></tr></thead>
+                <tbody id="arsenal-body"></tbody>
+              </table>
+            </div>
+          </fieldset>
+          <fieldset>
             <legend>Installed plugins</legend>
             <div class="plug-add">
               <input id="plug-url" placeholder="paste a GitHub repo URL to clone &amp; install&hellip;" spellcheck="false">
@@ -889,7 +903,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/debug.js?v=1"></script>
 <script src="/static/eye.js?v=2"></script>
 <script src="/static/game.js?v=2"></script>
-<script src="/static/chat.js?v=11"></script>
+<script src="/static/chat.js?v=13"></script>
 <script src="/static/library.js?v=2"></script>
 <script src="/static/imagine.js?v=2"></script>
 <script src="/static/dream.js?v=2"></script>
@@ -904,8 +918,8 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/sidebar.js?v=4"></script>
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
-<script src="/static/plugins.js?v=7"></script>
-<script src="/static/tools.js?v=10"></script>
+<script src="/static/plugins.js?v=8"></script>
+<script src="/static/tools.js?v=13"></script>
 <script src="/static/p2p.js?v=7"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>

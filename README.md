@@ -14,7 +14,7 @@ thinks, speaks, and gets pretty unpredictable when you click on it.
 tagged for *your* GPU/RAM (with CPU-only picks), and the GPU-hungry extras — the
 animated eye, the scrolling tickers — can be frame-capped or hidden entirely.
 
-> **▶ [Download the latest installer](https://github.com/quintenlittle/aeye/releases/latest)** — Windows 10/11 · one guided setup · ~73 MB
+> **▶ [Download the latest installer](https://github.com/quintenlittle/aeye/releases/latest)** — Windows 10/11 · one guided setup · ~103 MB
 
 > ⚠️ **Unsigned build.** AEYE isn't code-signed yet, so the first launch shows a one-time
 > Windows **SmartScreen** prompt — click **More info → Run anyway**.
@@ -442,7 +442,10 @@ things — not just talk about them. Turn on **Allow LLM Tool Access** in
   sequence itself) — only genuinely complex/dangerous work pays the full `[PLAN]`
   cost. A **Force full agent mode** toggle disables routing for A/B testing.
 - **Custom tools**: any plugin declaring `"type":"tool"` becomes callable, reusing
-  the same runner (Python **and** Node). A bundled **`word_count`** sample shows the shape.
+  the same runner (Python **and** Node). Bundled **`word_count`** and **`weather`**
+  (`weather` needs an explicit city/state — never guessed from your IP) samples show
+  the shape, and every tool the model can call — built-ins plus your own — is listed
+  in the **Tool arsenal** in **Manage → Plugins**.
 - **Permission modes** — **Read Only** · **Read + Write** · **Autonomous** — plus an
   optional **Confirm writes & exec** prompt and a **Dry run** switch that simulates
   every change without writing anything.

@@ -556,6 +556,7 @@
     // regardless of this choice. Conservative: AGENT on any danger/multi signal.
     let execMode = 'simple';
     let toolCtx = '';
+    let routeInfo = null;
     if (window.TOOLS) {
       try {
         // ALWAYS refresh from the authoritative backend FIRST -- reading
@@ -564,7 +565,8 @@
         // "Set". Refreshing first makes a saved workspace active with no button.
         await TOOLS.refresh();
         if (TOOLS.enabled()) {
-          execMode = TOOLS.classifyMode(text);
+          routeInfo = TOOLS.classifyInfo(text);     // {mode,reason,request_class,explicit_paths}
+          execMode = routeInfo.mode;
           toolCtx = TOOLS.systemPrompt(execMode);   // '' for simple
         }
       } catch { /* noop */ }
@@ -572,7 +574,15 @@
     if (window.DEBUG && DEBUG.enabled()) {
       const c = (window.TOOLS && TOOLS.config && TOOLS.config()) || {};
       const av = (window.TOOLS && TOOLS.enabled()) ? TOOLS.toolsForMode(execMode).map((t) => t.name) : [];
-      DEBUG.log('agent', '[ROUTER]', { mode: execMode.toUpperCase(), tool_prompt: toolCtx ? 'yes' : 'no' });
+      // Router context (Task 8): WHY this mode + the extracted operation/paths.
+      // Never logs the full user message -- only the routing decision + the
+      // explicit file tokens it saw.
+      DEBUG.log('agent', '[ROUTER]', {
+        mode: execMode.toUpperCase(),
+        reason: routeInfo ? routeInfo.reason : 'tool access off',
+        request_class: routeInfo ? routeInfo.request_class : 'interactive',
+        explicit_paths: routeInfo ? routeInfo.explicit_paths : [],
+        tool_prompt: toolCtx ? 'yes' : 'no' });
       DEBUG.log('model', '[MODEL]', { selected: model, backend, advertised_tools: av });
       DEBUG.log('model', '[PROMPT]', { mode: execMode.toUpperCase(), system_chars: (sys ? sys.length : 0) + toolCtx.length, tool_count: av.length });
       DEBUG.log('workspace', '[WORKSPACE]', { configured_root: c.root, root_valid: c.root_valid, root_active: c.root_active });
@@ -609,7 +619,14 @@
                     completed: [], failed: [], lastResult: null, opsPerFile: {} };
     // PHASE 2 -- perf instrumentation (debug-only)
     const perf = { t0: performance.now(), model_ms: 0, tool_ms: 0, ctxChars: 0, planning_ms: 0 };
-    // operations that must ALWAYS go through the full AGENT plan path
+    // Operation classes -- the diff/hash gate is CONTENT-mutation-only; it must
+    // NOT be imposed on structural/destructive/exec ops:
+    //   CONTENT     write_file          -> preview_diff + hash gate (existing file only)
+    //   STRUCTURAL  move_file, create_directory -> plan + confinement, NO diff
+    //   DESTRUCTIVE delete_file         -> AGENT + matching plan + permission, NO diff/hash
+    //   EXECUTION   run_command, pip_install    -> AGENT + env restrictions
+    // Only write_file ever reaches controllerWrite/preview_diff; delete/move/create
+    // go straight to the executor once their plan step matches.
     const DANGEROUS = new Set(['delete_file', 'move_file', 'run_command', 'pip_install']);
 
     // PHASE 5 -- controller-owned STANDARD write: the model decided the content;
@@ -649,6 +666,27 @@
       state.messages.push({ role: 'assistant', content: msg });
       EYE.setState('idle');
     };
+    // TASK 1 -- controller block diagnostics: EVERY parsed tool call that does not
+    // reach the executor emits [TOOL BLOCKED] with the reason + the state that
+    // caused it, so nothing is ever silently dropped between parser and executor.
+    function logBlocked(reason, call, extra) {
+      if (!(window.DEBUG && DEBUG.enabled())) return;
+      const c = (window.TOOLS && TOOLS.config && TOOLS.config()) || {};
+      const cur = agent.plan.length
+        ? (agent.plan[Math.min(agent.step, agent.plan.length - 1)] || null) : null;
+      const paths = (call && call.args)
+        ? [call.args.path, call.args.path_from, call.args.path_to].filter(Boolean) : [];
+      DEBUG.log('tools', '[TOOL BLOCKED]', Object.assign({
+        tool: call ? (call.name || '?') : '?',
+        reason,
+        plan_steps: agent.plan.length || 0,
+        current_step_index: agent.plan.length ? agent.step : null,
+        expected_step: cur,                 // the plan step's intent (verb + path)
+        actual_paths: paths,
+        permission: c.mode || null,
+        approval: c.approval || null,
+      }, extra || {}));
+    }
     const allSources = [];      // pages the web tools drew on -> "Sources" footer
     try {
       for (;;) {
@@ -726,6 +764,23 @@
         // (plain prose = final answer). Mirrors the web branch structure.
         const tcall = toolsOn ? TOOLS.detect(acc) : null;
 
+        // TASK 7 -- missing-argument tracing: log the exact isolated candidate the
+        // strict parser received, what it parsed to, and the schema the model was
+        // given. This pinpoints WHERE a path argument disappears (model output vs
+        // parser vs backend). Debug-only; sanitizer redacts secrets + caps length.
+        if (toolsOn && window.DEBUG && DEBUG.enabled()) {
+          const cand = TOOLS.rawCandidate(acc);
+          if (cand !== null) {
+            DEBUG.log('tools', '[TOOL CANDIDATE RAW]', cand);
+            if (tcall && tcall.malformed) {
+              DEBUG.log('tools', '[TOOL CALL PARSED]', { malformed: true, error: tcall.error });
+            } else if (tcall && tcall.name) {
+              DEBUG.log('tools', '[TOOL CALL PARSED]', { name: tcall.name, args: tcall.args });
+              DEBUG.log('tools', '[TOOL SCHEMA]', TOOLS.schemaFor(tcall.name));
+            }
+          }
+        }
+
         // PHASE 1/2 -- PLANNING: a [PLAN] reply (no tool call) is VALIDATED and
         // recorded before execution, then we drive the model through it.
         if (toolsOn && !tcall && !agent.step) {
@@ -741,7 +796,8 @@
             continue;
           }
           if (p && p.steps && agent.planCount < 3) {           // valid plan -> record
-            agent.plan = p.steps; agent.planCount++;
+            agent.plan = p.steps; agent.planCount++; agent.step = 0;
+            if (window.DEBUG) DEBUG.log('agent', '[PLAN RECORDED]', { steps: p.steps.length, plan: p.steps });
             out.body.textContent = '';
             webChip(out.div, '🧠 plan · ' + p.steps.length + ' step' + (p.steps.length === 1 ? '' : 's'),
               p.steps.map((s, i) => (i + 1) + '. ' + s).join('\n'));
@@ -756,6 +812,7 @@
         if (tcall) {
           // LOOP CONTROL: hard cap of MAX_TOOL_CALLS per user turn
           if (toolCalls >= MAX_TOOL_CALLS) {
+            logBlocked('tool_limit', tcall, { limit: MAX_TOOL_CALLS });
             stopAgent(out, 'Execution stopped: tool call limit reached (' + MAX_TOOL_CALLS + ').');
             break;
           }
@@ -764,6 +821,7 @@
 
           // STRICT FORMAT: malformed call -> structured error back, no execution
           if (tcall.malformed) {
+            logBlocked('malformed', tcall, { error: tcall.error });
             out.body.textContent = '';
             webChip(out.div, '⚠ invalid tool call', 'rejected');
             const key = 'malformed:' + TOOLS.errKey(tcall.error);
@@ -778,6 +836,7 @@
           // DEDUP: identical tool + args two times in a row -> stop
           const sig = tcall.name + ':' + JSON.stringify(tcall.args);
           if (sig === lastCallSig) {
+            logBlocked('dedup', tcall);
             stopAgent(out, 'Execution stopped: repeated identical tool call.');
             break;
           }
@@ -794,6 +853,8 @@
 
           // PHASE 1 -- HARD plan enforcement (mode-aware). No auto-continue.
           if (needPlan && !agent.plan.length) {
+            logBlocked('plan_required', tcall, {
+              why: dangerous ? 'destructive/exec op' : (secondFile ? 'multi-file' : 'agent-classified') });
             out.body.textContent = '';
             webChip(out.div, '🧠 plan required', 'rejected');
             const key = 'noplan';
@@ -814,7 +875,7 @@
           // (no [PLAN], no extra model rounds), safety checks still backend-enforced.
           if (!agent.plan.length && execMode !== 'agent' && tcall.name === 'write_file' && !needPlan) {
             if (fp) agent.opsPerFile[fp] = (agent.opsPerFile[fp] || 0) + 1;
-            if (fp && agent.opsPerFile[fp] > 3) { stopAgent(out, 'Redundant operation detected on ' + fp + '.'); break; }
+            if (fp && agent.opsPerFile[fp] > 3) { logBlocked('redundancy', tcall, { file: fp }); stopAgent(out, 'Redundant operation detected on ' + fp + '.'); break; }
             out.body.textContent = '';
             const fill = webChip(out.div, tcall.label, 'editing…');
             EYE.setState('refreshing', '◉ AEYE IS EDITING A FILE…');
@@ -838,6 +899,7 @@
           if (mutating && agent.plan.length) {
             const cur = agent.plan[Math.min(agent.step, agent.plan.length - 1)] || '';
             if (!TOOLS.stepMatches(cur, tcall)) {
+              logBlocked('step_mismatch', tcall, { expected_step: cur });
               out.body.textContent = '';
               webChip(out.div, '⏱ step mismatch', 'rejected');
               const key = 'stepmismatch:' + TOOLS.errKey(cur);
@@ -858,6 +920,7 @@
               const n = (agent.opsPerFile[fpath] || 0) + 1;
               agent.opsPerFile[fpath] = n;
               if (n > 3) {
+                logBlocked('redundancy', tcall, { file: fpath, count: n });
                 stopAgent(out, 'Redundant operation detected on ' + fpath + '.');
                 break;
               }
@@ -871,6 +934,7 @@
               'The model wants to run a tool: ' + tcall.label + '. Allow it?',
               [{ value: 'yes', label: '✅ Run it' }, { value: 'no', label: '✋ Skip' }]);
             if (choice !== 'yes') {
+              logBlocked('approval', tcall);
               webChip(out.div, tcall.label, 'skipped by you');
               work.push({ role: 'user', content: '[TOOL RESULT]\n' + JSON.stringify({
                 success: false, output: null,
@@ -916,7 +980,16 @@
           } else {
             lastToolErr = null; sameErrCount = 0; successfulOps++;   // a success breaks the streak
             agent.completed.push({ step: agent.step + 1, tool: tcall.name });
-            if (agent.plan.length) agent.step = Math.min(agent.step + 1, agent.plan.length);
+            if (agent.plan.length) {
+              const from = agent.step;
+              agent.step = Math.min(agent.step + 1, agent.plan.length);
+              // TASK 4 -- make step advancement traceable: a read/verify success moves
+              // the cursor forward so a later destructive step can match + execute.
+              if (window.DEBUG) DEBUG.log('agent', '[PLAN STEP]', {
+                tool: tcall.name, from_index: from, to_index: agent.step,
+                of_steps: agent.plan.length,
+                now_expecting: agent.plan[Math.min(agent.step, agent.plan.length - 1)] || null });
+            }
           }
 
           work.push({ role: 'user', content: res.message });
