@@ -623,7 +623,11 @@
     // the loop's working transcript: state.messages plus any tool-call rounds.
     // tool exchanges live ONLY here (not state.messages) so the visible/saved
     // transcript stays clean -- just the user turn and the final answer.
-    const webOn = !!(window.WEB && WEB.enabled()) && webRoute.decision !== 'offline';
+    // Never let web_search answer a weather request -- weather has a dedicated
+    // tool (ask for city/state, then curl wttr.in). Suppress web tools this turn
+    // whenever the router saw weather intent, so web can't hijack it.
+    const webOn = !!(window.WEB && WEB.enabled())
+      && webRoute.decision !== 'offline' && webRoute.intent !== 'weather';
     const toolsOn = !!(window.TOOLS && TOOLS.enabled()) && execMode !== 'simple';
     const work = state.messages.slice();
 
