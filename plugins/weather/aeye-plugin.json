@@ -8,6 +8,6 @@
     {"name": "location", "type": "string", "required": true,
      "description": "A real location the user named: 'City, ST', a city/country, or a ZIP/postal code like '79360'. Required. If unknown, ask the user first -- do NOT pass '?', 'unknown', 'here', 'current location', or any guess/IP-derived value."}
   ],
-  "command": ["python", "weather.py", "{location}"],
+  "command": ["python", "weather.py", "{location}", "{query}"],
   "timeout": 20
 }
