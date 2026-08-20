@@ -626,6 +626,26 @@
     const webOn = !!(window.WEB && WEB.enabled()) && webRoute.decision !== 'offline';
     const toolsOn = !!(window.TOOLS && TOOLS.enabled()) && execMode !== 'simple';
     const work = state.messages.slice();
+
+    // WEATHER REQUIRED-CONTEXT GATE (independent of web policy): the weather tool
+    // needs a real city/state the user named — never IP, never a placeholder. If
+    // this message asks about weather with no location in it and the weather tool
+    // is available, steer the model to ask first rather than emit location="?".
+    // (It may still proceed if it already knows the location from earlier turns.)
+    if (toolsOn && (TOOLS.list() || []).some((t) => t.name === 'weather')) {
+      const wantsWeather = /\b(weather|forecast|temperature|how (?:hot|cold)|is it (?:raining|snowing)|rain(?:ing)?|snow(?:ing)?)\b/i.test(text);
+      const hasLocation = /,\s*[A-Za-z.]{2,}/.test(text) || /\b(in|for|at|near)\s+[A-Z][a-zA-Z]+/.test(text);
+      if (wantsWeather && !hasLocation) {
+        work.push({ role: 'user', content: '[SYSTEM] The user asked about weather but named no '
+          + 'city/state in this message. If you do NOT already know their specific city and state '
+          + 'from earlier in this conversation, ASK them "What city and state are you in?" and do '
+          + 'NOT call the weather tool yet. Never invent, infer, or use a placeholder location '
+          + '(no "?", "unknown", "here", "current location", or IP-derived guess).' });
+        if (window.DEBUG && DEBUG.enabled())
+          DEBUG.log('web', '[WEATHER GATE]', { decision: 'ask_user', reason: 'weather intent, no location in message' });
+      }
+    }
+
     const buildPayload = () => ({
       backend, model,
       messages: sysAll ? [{ role: 'system', content: sysAll }, ...work] : work,

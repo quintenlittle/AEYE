@@ -865,6 +865,19 @@ body:has(#chat-panel.hidden) #composer { display: none; }
   gap: 10px;
 }
 .modal-narrow { width: min(760px, 94vw); }
+/* Manage modal: wide, responsive layout so the Tool Registry rows and the Debug
+   log read comfortably (no horizontal scrollbar at normal desktop widths). */
+#settings-modal .modal { width: min(1400px, 90vw); }
+#settings-modal #dbg-log { max-height: 52vh; }
+/* Tool Registry table: let it breathe -- badges stay on one line, the args and
+   implementation columns get real width, and the row never forces a page scroll. */
+#arsenal-table { width: 100%; table-layout: auto; }
+#arsenal-table th, #arsenal-table td { white-space: nowrap; vertical-align: top; }
+#arsenal-table .plug-mode { display: inline-block; white-space: nowrap; margin-left: 0; }
+#arsenal-table .mem-title { max-width: none; }
+#arsenal-table td.plug-cmd { max-width: 480px; white-space: normal; word-break: break-word; }
+#arsenal-table tr.tool-detail td { white-space: pre-wrap; }
+#plug-table td.plug-cmd { max-width: 420px; }
 
 .modal-head { display: flex; align-items: baseline; gap: 14px; }
 .modal-title {

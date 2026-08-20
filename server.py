@@ -3192,6 +3192,13 @@ def _validate_args(tool: dict, args: dict):
     e.g. write_file.content / preview_diff.new_content, where emptying a file (or
     previewing an empty new version) is a legitimate operation. All other required
     args (paths, cmd, package, ...) still reject blank/whitespace-only values."""
+    # Unknown-argument rejection (registry-driven, global): only declared schema
+    # args are accepted. An undeclared arg fails validation -- never silently
+    # dropped, never auto-repaired. e.g. weather rejects {"units":...}.
+    declared = {spec["name"] for spec in tool.get("args", [])}
+    for k in (args or {}):
+        if k not in declared:
+            return None, "unknown argument '{}' for tool '{}'".format(k, tool.get("name", "?"))
     clean = {}
     for spec in tool.get("args", []):
         an = spec["name"]

@@ -3,10 +3,10 @@
   "trigger": "weather",
   "type": "tool",
   "access": "read",
-  "description": "Get the current weather for an EXPLICIT city/state (or city/country) location. The location is required and must come from the user -- NEVER infer it from IP/network, because Starlink/VPN/ISP egress can report the wrong city. If the user asks for weather without naming a place, ask 'What city and state are you in?' first; do not guess.",
+  "description": "Get the current weather for an EXPLICIT city/state (or city/country). The location MUST be a concrete place the user actually named (e.g. 'Seminole, TX'). NEVER invent, infer, or substitute a location, and NEVER use a placeholder such as '?', 'unknown', 'here', 'current location', 'my location', or the IP/network location. If the user's city/state is not explicitly known from the conversation, DO NOT call this tool -- instead ask 'What city and state are you in?' and wait for their answer.",
   "args": [
     {"name": "location", "type": "string", "required": true,
-     "description": "City and state or country, e.g. 'Seminole, TX'. Required -- ask the user if unknown; never infer from IP."}
+     "description": "A real city and state/country the user named, e.g. 'Seminole, TX'. Required. If unknown, ask the user first -- do NOT pass '?', 'unknown', 'here', 'current location', or any guess/IP-derived value."}
   ],
   "command": ["python", "weather.py", "{location}"],
   "timeout": 20

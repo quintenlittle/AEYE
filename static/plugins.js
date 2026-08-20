@@ -500,6 +500,16 @@
       tdN.textContent = p.name;
       if (p.description) tdN.title = p.description;
 
+      // Type column: a plugin exposes a model-callable tool OR command behavior
+      const tdTy = document.createElement('td');
+      const tyTag = document.createElement('span');
+      tyTag.className = 'plug-mode';
+      tyTag.textContent = p.type === 'tool' ? 'tool' : 'command';
+      tyTag.title = p.type === 'tool'
+        ? 'exposes a model-callable tool (also in the Tool Registry)'
+        : 'trigger/command plugin (invoked by typing its trigger)';
+      tdTy.appendChild(tyTag);
+
       const tdT = document.createElement('td');
       if (p.error) {
         tdT.className = 'docs-err';
@@ -588,7 +598,7 @@
       });
       tdS.appendChild(trash);
 
-      tr.append(tdN, tdT, tdC, tdS);
+      tr.append(tdN, tdTy, tdT, tdC, tdS);
       tb.appendChild(tr);
     }
 
