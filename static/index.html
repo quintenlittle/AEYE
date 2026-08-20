@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AEYE &mdash; the all-seeing LLM container</title>
-<link rel="stylesheet" href="/static/style.css?v=24">
+<link rel="stylesheet" href="/static/style.css?v=25">
 </head>
 <body data-state="idle">
 <script>
@@ -212,6 +212,7 @@ if (!localStorage.getItem('aeye-default-v3')) {
         <button class="tab" data-tab="tab-settings" type="button">settings</button>
         <button class="tab" data-tab="tab-plugins" type="button">plugins</button>
         <button class="tab" data-tab="tab-p2p" type="button">chat</button>
+        <button class="tab" data-tab="tab-debug" type="button">debug</button>
       </div>
       <div class="modal-body">
         <div class="tab-panel on" id="tab-models">
@@ -494,7 +495,7 @@ if (!localStorage.getItem('aeye-default-v3')) {
             <label class="chk"><input id="tool-dryrun" type="checkbox"> Dry run (simulate all file changes &mdash; nothing is written)</label>
             <label class="chk"><input id="tool-forceagent" type="checkbox"> Force full agent mode (A/B testing &mdash; always plan; disables fast routing)</label>
             <div class="tool-root-row" style="margin-top:8px">
-              <span class="fieldset-hint" style="flex:1;margin:0">Performance-test profile is <b id="perf-state">ON</b> (tickers &amp; eye off at startup, RedDragon default). Your saved model/ticker/eye choices always win.</span>
+              <span class="fieldset-hint" style="flex:1;margin:0">Performance-test profile is <b id="perf-state">ON</b> (tickers &amp; eye off at startup, Qwythos-Mythos-5 default if installed). Your saved model/ticker/eye choices always win.</span>
               <button id="perf-restore" type="button" class="ghost">Restore Normal Defaults</button>
             </div>
             <div class="fieldset-hint">
@@ -587,6 +588,20 @@ if (!localStorage.getItem('aeye-default-v3')) {
               <button id="p2p-clear-log" type="button" class="ghost">Clear Logs</button>
             </div>
             <pre id="p2p-log" class="p2p-log"></pre>
+          </fieldset>
+        </div>
+        <div class="tab-panel" id="tab-debug">
+          <fieldset>
+            <legend>Universal Debug</legend>
+            <label class="chk"><input id="dbg-enable" type="checkbox"> Enable Debug Mode (application-wide)</label>
+            <div class="fieldset-hint">One diagnostic log for agent/router/tools/workspace/model/plugins/P2P/file-transfer/UPnP. Observation only &mdash; never changes behavior. Off: nothing captured or persisted. Secrets are redacted; file/chat contents are not logged. Persists across restarts.</div>
+            <div class="dbg-filters" id="dbg-filters"></div>
+            <div class="row" style="margin-top:8px; justify-content:space-between; align-items:center">
+              <span class="ticker-cfg-head">Diagnostic log</span>
+              <span><button id="dbg-refresh" type="button" class="ghost">Refresh</button>
+              <button id="dbg-clear" type="button" class="ghost">Clear Debug Log</button></span>
+            </div>
+            <pre id="dbg-log" class="p2p-log" style="max-height:340px"></pre>
           </fieldset>
         </div>
       </div>
@@ -871,9 +886,10 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
     <div class="p2p-drop-hint">Drop file to send</div>
   </div>
 
+<script src="/static/debug.js?v=1"></script>
 <script src="/static/eye.js?v=2"></script>
 <script src="/static/game.js?v=2"></script>
-<script src="/static/chat.js?v=10"></script>
+<script src="/static/chat.js?v=11"></script>
 <script src="/static/library.js?v=2"></script>
 <script src="/static/imagine.js?v=2"></script>
 <script src="/static/dream.js?v=2"></script>
@@ -889,7 +905,7 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
 <script src="/static/theme.js?v=3"></script>
 <script src="/static/skull.js?v=2"></script>
 <script src="/static/plugins.js?v=7"></script>
-<script src="/static/tools.js?v=9"></script>
+<script src="/static/tools.js?v=10"></script>
 <script src="/static/p2p.js?v=7"></script>
 <script src="/static/startup.js?v=2"></script>
 <script>
@@ -936,6 +952,37 @@ placeholder="FROM llama3.2:3b&#10;PARAMETER temperature 0.8&#10;PARAMETER num_ct
   var btn = document.getElementById('manage-btn');
   if (btn) btn.addEventListener('click', function () { modal.classList.remove('hidden'); });
   window.SETTINGS = { open: function (tab) { modal.classList.remove('hidden'); if (tab) show(tab); } };
+})();
+
+/* Universal Debug panel (Manage -> debug) wiring */
+(function () {
+  if (!window.DEBUG) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var box = $('dbg-log'), en = $('dbg-enable'), filters = $('dbg-filters');
+  if (!box || !en) return;
+  var CATS = ['agent', 'tools', 'workspace', 'model', 'plugins', 'p2p', 'filetransfer', 'runtime', 'web'];
+  var active = new Set();
+  function render() {
+    box.textContent = DEBUG.text(active.size ? [].concat.apply([], [...active]) : null);
+    box.scrollTop = box.scrollHeight;
+  }
+  // filter chips
+  CATS.forEach(function (c) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'dbg-chip'; b.textContent = c;
+    b.addEventListener('click', function () {
+      if (active.has(c)) { active.delete(c); b.classList.remove('on'); }
+      else { active.add(c); b.classList.add('on'); }
+      render();
+    });
+    filters.appendChild(b);
+  });
+  en.checked = DEBUG.enabled();
+  en.addEventListener('change', function () { DEBUG.setEnabled(en.checked); render(); });
+  var cl = $('dbg-clear'); if (cl) cl.addEventListener('click', function () { DEBUG.clear(); render(); });
+  var rf = $('dbg-refresh'); if (rf) rf.addEventListener('click', render);
+  DEBUG.onChange(function () { if (!$('tab-debug').classList.contains('on')) return; render(); });
+  document.querySelector('[data-tab="tab-debug"]').addEventListener('click', function () { en.checked = DEBUG.enabled(); render(); });
 })();
 </script>
 </body>

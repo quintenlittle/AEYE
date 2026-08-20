@@ -22,7 +22,12 @@
   async function refresh() {
     try {
       const d = await (await fetch('/api/plugins/tools')).json();
-      if (d && d.config) cfg = Object.assign(cfg, d.config, { root: d.root_resolved || d.config.root });
+      if (d && d.config) cfg = Object.assign(cfg, d.config, {
+        root: d.root_resolved || d.config.root,
+        root_valid: !!d.root_valid,
+        // workspace is ACTIVE when tools are enabled AND the root is a real dir
+        root_active: !!(d.config.enabled && d.root_valid),
+      });
       if (d && Array.isArray(d.tools)) tools = d.tools;
     } catch { /* keep last known */ }
     return { cfg, tools };
@@ -63,7 +68,7 @@
   // conservative router (Phase 3/4): picks which PROMPT + tools to send. Safety
   // is NOT decided here -- the loop enforces plans/limits regardless. SIMPLE only
   // when clearly no tools; AGENT on any danger/multi signal; else STANDARD.
-  const TOOLY = /\b(file|files|read|write|create|edit|modify|change|update|append|save|list|folder|directory|check|syntax|preview|diff|workspace|script|code|\.(py|js|ts|jsx|json|md|txt|csv|html|css|ya?ml))\b/i;
+  const TOOLY = /\b(file|files|read|open|show|display|view|cat|contents?|write|create|make|edit|modify|change|update|append|save|list|ls|folder|directory|dir|check|validate|syntax|preview|diff|workspace|script|code|\.(py|js|ts|jsx|json|md|txt|csv|html|css|ya?ml|sh|bat|ini|cfg|log))\b/i;
   const DANGER = /\b(delete|remove|rm\b|move|rename|run|execute|install|pip|package|dependency|npm|terminal|command|venv|environment|virtualenv)\b/i;
   const MULTI = /\b(files|multiple|several|each|every|all\s+the|both|project|across|three|two\s+files|then|after that|and then|refactor)\b/i;
   function classifyMode(text) {

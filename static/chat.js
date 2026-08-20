@@ -30,7 +30,9 @@
   const DEFAULT_MODEL = 'ollama::dolphin-mistral:latest';
   // Performance-test profile (separate, reversible; see PERF.restore). Default ON
   // for this testing build; the user's saved model/ticker/eye choices always win.
-  const PERF_MODEL = 'ollama::RedDragon-Qwythos-9B:latest';
+  // GGUF pulled into Ollama is named hf.co/<repo>:latest; only used if installed
+  // (never auto-downloaded), and a user's saved model choice always wins.
+  const PERF_MODEL = 'ollama::hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:latest';
   const perfProfile = () => localStorage.getItem('aeye-perf-profile') !== '0';
 
   // ---- helpers -----------------------------------------------------------
@@ -554,12 +556,27 @@
     // regardless of this choice. Conservative: AGENT on any danger/multi signal.
     let execMode = 'simple';
     let toolCtx = '';
-    if (window.TOOLS && TOOLS.enabled()) {
+    if (window.TOOLS) {
       try {
+        // ALWAYS refresh from the authoritative backend FIRST -- reading
+        // TOOLS.enabled() before this saw stale default (enabled=false) config on
+        // a fresh page load, so tools silently didn't engage until the user pressed
+        // "Set". Refreshing first makes a saved workspace active with no button.
         await TOOLS.refresh();
-        execMode = TOOLS.classifyMode(text);
-        toolCtx = TOOLS.systemPrompt(execMode);   // '' for simple
+        if (TOOLS.enabled()) {
+          execMode = TOOLS.classifyMode(text);
+          toolCtx = TOOLS.systemPrompt(execMode);   // '' for simple
+        }
       } catch { /* noop */ }
+    }
+    if (window.DEBUG && DEBUG.enabled()) {
+      const c = (window.TOOLS && TOOLS.config && TOOLS.config()) || {};
+      const av = (window.TOOLS && TOOLS.enabled()) ? TOOLS.toolsForMode(execMode).map((t) => t.name) : [];
+      DEBUG.log('agent', '[ROUTER]', { mode: execMode.toUpperCase(), tool_prompt: toolCtx ? 'yes' : 'no' });
+      DEBUG.log('model', '[MODEL]', { selected: model, backend, advertised_tools: av });
+      DEBUG.log('model', '[PROMPT]', { mode: execMode.toUpperCase(), system_chars: (sys ? sys.length : 0) + toolCtx.length, tool_count: av.length });
+      DEBUG.log('workspace', '[WORKSPACE]', { configured_root: c.root, root_valid: c.root_valid, root_active: c.root_active });
+      DEBUG.log('agent', '[AGENT CONFIG]', { enabled: c.enabled, permission: c.mode, approval: c.approval, dry_run: c.dry_run, force_agent: c.force_agent });
     }
     const sysAll = [sys, webCtx, toolCtx, docCtx, memCtx].filter(Boolean).join('\n\n');
 
@@ -583,7 +600,7 @@
     // wrappers stay silent -- so voice tracks the typewriter here too.
     if (window.VOICE) { try { window.VOICE.resetStream(); } catch { /* noop */ } }
 
-    let curOut = null, rounds = 0, toolCalls = 0;
+    let curOut = null, rounds = 0, toolCalls = 0, successfulOps = 0;
     // agent-loop stability: stop on repeated identical failures / env errors /
     // identical repeated calls
     let lastToolErr = null, sameErrCount = 0, lastCallSig = null;
@@ -603,12 +620,15 @@
       const path = String(args.path || '');
       const content = args.content;
       const t = performance.now();
+      const dbg = window.DEBUG && DEBUG.enabled();
       // 1) preview: records the file hash + reports whether it exists (gate prep)
       const pv = await TOOLS.run({ name: 'preview_diff', args: { path, new_content: content } });
+      if (dbg) DEBUG.log('agent', '[FAST PATH]', { operation: 'edit ' + path, preview: pv.ok ? 'ok' : 'fail', hash_gate: pv.ok ? 'recorded' : 'n/a' });
       if (!pv.ok) { perf.tool_ms += performance.now() - t; return pv; }
       // 2) write: the diff-gate + hash check now pass for this exact content
       const wr = await TOOLS.run({ name: 'write_file', args: { path, content } });
       perf.tool_ms += performance.now() - t;
+      if (dbg) DEBUG.log('tools', '[FAST PATH] write', { path, success: wr.ok });
       if (!wr.ok) return wr;
       let extra = '';
       // 3) targeted validation (Phase 14): only the file we just changed
@@ -616,6 +636,7 @@
         const tc = performance.now();
         const ck = await TOOLS.run({ name: 'check_code', args: { path } });
         perf.tool_ms += performance.now() - tc;
+        if (dbg) DEBUG.log('tools', '[FAST PATH] validation', { path, syntax_ok: ck.ok });
         extra = ck.ok ? ' Syntax OK.' : (' Syntax check FAILED: ' + ck.error);
       }
       const output = String(wr.output || 'Write successful') + extra;
@@ -806,7 +827,7 @@
               const k = TOOLS.errKey(res.error);
               if (k && k === lastToolErr) sameErrCount++; else { sameErrCount = 1; lastToolErr = k; }
               if (sameErrCount >= 2) { stopAgent(out, 'Execution stopped: repeated failure detected.'); break; }
-            } else { lastToolErr = null; sameErrCount = 0; }
+            } else { lastToolErr = null; sameErrCount = 0; successfulOps++; }
             perf.ctxChars += res.message.length;
             work.push({ role: 'user', content: res.message });
             EYE.setState('thinking');
@@ -868,10 +889,12 @@
             : '◉ AEYE IS USING TOOLS…');
           // track touched files (Phase 3/4) from any file-tool path argument
           if (tcall.args && tcall.args.path) agent.touched.add(String(tcall.args.path));
+          if (window.DEBUG) DEBUG.log('tools', '[TOOL CALL]', { name: tcall.name, args: tcall.args });
           const _t0 = performance.now();
           const res = await TOOLS.run(tcall);
           perf.tool_ms += performance.now() - _t0;   // PHASE 2: tool exec latency
           perf.ctxChars += (res.message || '').length;
+          if (window.DEBUG) DEBUG.log('tools', '[TOOL RESULT]', { name: tcall.name, success: res.ok, error: res.error || null });
           fill(res.display);
           agent.lastResult = res;
 
@@ -891,7 +914,7 @@
               break;
             }
           } else {
-            lastToolErr = null; sameErrCount = 0;   // a success breaks the streak
+            lastToolErr = null; sameErrCount = 0; successfulOps++;   // a success breaks the streak
             agent.completed.push({ step: agent.step + 1, tool: tcall.name });
             if (agent.plan.length) agent.step = Math.min(agent.step + 1, agent.plan.length);
           }
@@ -917,6 +940,15 @@
           continue;
         }
 
+        // PHASE 5 -- AUTHORITATIVE ACTION: a tool-directed turn that did ZERO real
+        // tool ops but whose prose CLAIMS a file action is a hallucination. Never
+        // pass it off as done -- surface that nothing actually happened on disk.
+        if (execMode !== 'simple' && successfulOps === 0 &&
+            /\b(deleted|removed|created|wrote|written|modified|edited|updated|saved|renamed|moved|ran|executed|installed)\b[\s\S]{0,40}\b(file|it|that|the\s+\w+|directory|folder|script|package)\b/i.test(acc)) {
+          acc += '\n\n⚠ Note: no tool action was actually performed — this is a description, not a completed operation. Nothing was changed on disk. Re-issue the request (a valid tool call is required to make the change).';
+          if (curOut) curOut.body.textContent = acc;
+          if (window.DEBUG) DEBUG.log('agent', '[ERROR]', { component: 'authoritative-action', summary: 'model claimed a file action with 0 successful tool ops' });
+        }
         // final answer (tool budget spent, web off, or no tool asked). With web
         // on it was already streamed live in guarded mode above -- no need to
         // re-feed the whole thing at the end.

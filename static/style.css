@@ -122,6 +122,15 @@ header {
 }
 #badges.hidden { display: none; }        /* sysmon row hidden for now (see index.html) */
 
+/* Universal Debug filter chips (Manage > Debug) */
+.dbg-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.dbg-chip {
+  background: var(--well); color: var(--sclera); border: 1px solid var(--line);
+  border-radius: 10px; padding: 2px 10px; cursor: pointer; font: 11px var(--mono);
+}
+.dbg-chip:hover { color: var(--accent); }
+.dbg-chip.on { color: var(--accent); border-color: var(--accent); }
+
 /* LLM tool-access config (Manage > Plugins) */
 .tool-cfg-grid { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; }
 .tool-cfg-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--sclera); }

@@ -453,7 +453,10 @@ things — not just talk about them. Turn on **Allow LLM Tool Access** in
   Sanitized errors only — never raw stack traces.
 
 Off by default, everything is enforced **server-side**, deletion needs an explicit
-plan step, and nothing ever leaves your machine.
+plan step, and nothing ever leaves your machine. A saved workspace is **active at
+startup** (no button click), and every stage is visible in the application-wide
+**Manage → Debug** log — observation-only, persistent, with secrets redacted and no
+file/chat contents recorded.
 
 ## Peer-to-peer (P2P)
 
