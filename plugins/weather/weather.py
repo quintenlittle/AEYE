@@ -6,4 +6,5 @@ if not location:
     print("Location required. Ask the user for city and state.")
     sys.exit(0)
 
-subprocess.run("curl wttr.in/" + location.lower(), shell=True)
+# e.g. "Seminole, TX" -> curl wttr.in/seminole,tx  (no space, or curl splits it)
+subprocess.run("curl wttr.in/" + location.lower().replace(" ", ""), shell=True)
