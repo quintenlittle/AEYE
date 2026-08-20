@@ -568,6 +568,18 @@
           routeInfo = TOOLS.classifyInfo(text);     // {mode,reason,request_class,explicit_paths}
           execMode = routeInfo.mode;
           toolCtx = TOOLS.systemPrompt(execMode);   // '' for simple
+          // FOLLOW-UP FIX: if we just asked the user for a weather location, their
+          // reply ("seminole,tx") carries no keyword and would route SIMPLE, so the
+          // model's tool call never runs. When the previous assistant turn asked for
+          // a city/state/ZIP and a weather tool exists, engage the tool loop (AGENT).
+          if (execMode !== 'agent' && (TOOLS.list() || []).some((t) => t.name === 'weather')) {
+            const lastA = [...state.messages].reverse().find((m) => m.role === 'assistant');
+            if (lastA && /\b(city and state|zip code|what city|which city|your (?:city|location))\b/i.test(String(lastA.content || ''))) {
+              execMode = 'agent';
+              toolCtx = TOOLS.systemPrompt('agent');
+              if (routeInfo) { routeInfo.mode = 'agent'; routeInfo.reason = 'weather location reply (prev turn asked)'; }
+            }
+          }
         }
       } catch { /* noop */ }
     }
