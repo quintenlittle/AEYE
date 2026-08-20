@@ -1,10 +1,12 @@
 import subprocess
 import sys
 
-location = " ".join(sys.argv[1:]).strip()
-if not location:
+loc = " ".join(sys.argv[1:]).strip().lower().replace(" ", "")
+if not loc:
     print("Location required. Ask the user for city and state.")
     sys.exit(0)
 
-# e.g. "Seminole, TX" -> curl wttr.in/seminole,tx  (no space, or curl splits it)
-subprocess.run("curl wttr.in/" + location.lower().replace(" ", ""), shell=True)
+# open a real cmd window and curl wttr.in in front of the user -- the raw output,
+# no model interpretation.
+subprocess.Popen('start "AEYE weather" cmd /k curl wttr.in/' + loc, shell=True)
+print("Opened the weather for " + loc + " in a new window.")
