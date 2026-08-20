@@ -220,6 +220,40 @@ def _webview2_installed() -> bool:
     return False
 
 
+def _kill_children() -> None:
+    """On close, terminate the WHOLE AEYE process tree so nothing lingers: our
+    descendants (WebView2 helpers, plugin/runner subprocesses) AND the launcher
+    parent that spawned this worker (pywebview runs as parent-launcher + worker).
+    The separate scheduled-task 4chan relay is NOT in this tree and is left up."""
+    try:
+        import psutil
+        me = psutil.Process()
+        targets = me.children(recursive=True)
+        # include the parent launcher only if it's clearly part of AEYE (running
+        # desktop.py, or the frozen AEYE.exe) -- never the dev shell / explorer.
+        try:
+            par = me.parent()
+            if par:
+                sig = (par.name() or "").lower() + " " + " ".join(par.cmdline()).lower()
+                if "desktop.py" in sig or "aeye.exe" in sig:
+                    targets.append(par)
+        except Exception:
+            pass
+        for c in targets:
+            try:
+                c.terminate()
+            except Exception:
+                pass
+        _, alive = psutil.wait_procs(targets, timeout=2)
+        for c in alive:
+            try:
+                c.kill()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def main() -> None:
     import webview
     # pywebview disables downloads by default -- its WebView2 backend cancels
@@ -262,6 +296,9 @@ def main() -> None:
     # private_mode=False keeps localStorage (TTS prefs, selected model) across runs
     webview.start(private_mode=False,
                   storage_path=paths.WEBVIEW_DIR)
+    # window closed -> reap our child processes (WebView2 helpers, any spawned
+    # runners) so NOTHING AEYE lingers; the scheduled-task relay is not a child.
+    _kill_children()
     # hard exit: a graceful teardown garbage-collects multi-GB models and holds
     # the port + VRAM for seconds; the OS reclaims everything instantly instead
     os._exit(0)
